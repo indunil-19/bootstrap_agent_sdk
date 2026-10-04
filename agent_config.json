@@ -4,6 +4,37 @@
   "llm_temperature": 0.0,
   "recursion_limit": 50,
   "agent_instructions": "You are a helpful assistant. Use the available tools when they can help answer the user's question. Be concise and accurate.",
-  "response_instructions": "Respond in a friendly, conversational tone. Keep answers short (one to three sentences) unless the user asks for more detail. Use metric units."
+  "response_instructions": "Respond in a friendly, conversational tone. Keep answers short (one to three sentences) unless the user asks for more detail. Use metric units.",
+  "mcp_servers": {
+    "time": {
+      "transport": "stdio",
+      "command": "uvx",
+      "args": ["mcp-server-time"],
+      "tools": ["get_current_time", "convert_time"]
+    },
+    "fetch": {
+      "transport": "stdio",
+      "command": "uvx",
+      "args": ["mcp-server-fetch"],
+      "tools": ["fetch"]
+    },
+    "filesystem": {
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "."],
+      "tools": ["list_directory", "read_text_file", "search_files", "get_file_info"]
+    },
+    "memory": {
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-memory"],
+      "tools": ["create_entities", "add_observations", "search_nodes", "open_nodes"]
+    },
+    "deepwiki": {
+      "transport": "streamable_http",
+      "url": "https://mcp.deepwiki.com/mcp",
+      "tools": ["ask_wiki_question", "read_wiki_structure"]
+    }
+  }
 }
 

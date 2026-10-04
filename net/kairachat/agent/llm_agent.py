@@ -10,6 +10,7 @@ from langgraph.prebuilt import create_react_agent
 
 from net.kairachat.agent.agent import Agent
 from net.kairachat.agent.config.Agent_config import AgentConfig
+from net.kairachat.agent.mcp_loader import load_mcp_tools_from_config
 from net.kairachat.agent.models.State import State
 
 logger = logging.getLogger(__name__)
@@ -30,13 +31,33 @@ class ChatAgent(Agent):
             self.config.get("llm_temperature", ""),
             self.config.get("llm_base_url", None),
         )
+
+        self._build_agent()
+
+    @classmethod
+    async def create(cls, name, config_path, tools=None, log_level=logging.INFO):
+        """Create a ChatAgent with the given local tools plus the MCP tools declared
+        under "mcp_servers" in the agent config."""
+        agent = cls(name, config_path, list(tools or []), log_level)
+
+        mcp_tools = await load_mcp_tools_from_config(agent.config.get("mcp_servers"))
+        if mcp_tools:
+            agent.tools = agent.tools + mcp_tools
+            agent._build_agent()
+
+        return agent
+
+    def _build_agent(self):
+        tool_names = [getattr(tool, "name", None) or tool.__name__ for tool in self.tools]
+        duplicates = sorted({tool_name for tool_name in tool_names if tool_names.count(tool_name) > 1})
+        if duplicates:
+            raise ValueError(f"Duplicate tool names: {duplicates}. Tool names must be unique across local and MCP tools.")
+
         self.llm_with_tools = self.llm.bind_tools(self.tools)
-        self.agent = create_react_agent(self.llm_with_tools, tools=tools,prompt=self.config.get("agent_instructions", ""))
+        self.agent = create_react_agent(self.llm_with_tools, tools=self.tools, prompt=self.config.get("agent_instructions", ""))
 
         self._build_graph()
-
-
-
+        logger.info("[%s] agent ready with tools: %s", self.name, tool_names)
 
 
     async def agent_node(self, state:State, config: RunnableConfig):
