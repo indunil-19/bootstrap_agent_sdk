@@ -2,7 +2,7 @@ import logging
 import time
 
 from langchain.chat_models import init_chat_model
-from langchain_core.messages import HumanMessage, AIMessage, RemoveMessage, SystemMessage
+from langchain_core.messages import HumanMessage, AIMessage, RemoveMessage, SystemMessage, ToolMessage
 from langgraph.constants import START, END
 from langgraph.graph import StateGraph
 from langgraph.prebuilt import create_react_agent
@@ -35,15 +35,29 @@ class ChatAgent(Agent):
 
 
     async def agent_node(self, state:State):
+        logger.info("[%s] agent: running ReAct agent with %d messages", self.name, len(state["messages"]))
+        start = time.perf_counter()
+
         agent_response = await self.agent.ainvoke(state)
 
+        # Log the intermediate ReAct steps (tool calls and tool results) produced for this query
+        for message in agent_response["messages"][len(state["messages"]):]:
+            if isinstance(message, AIMessage) and message.tool_calls:
+                for tool_call in message.tool_calls:
+                    logger.info("[%s] agent: tool call -> %s(%s)", self.name, tool_call["name"], tool_call["args"])
+            elif isinstance(message, ToolMessage):
+                logger.info("[%s] agent: tool result <- %s: %s", self.name, message.name, message.content)
+
         final_message = agent_response["messages"][-1]
+        logger.info("[%s] agent: done in %.2fs", self.name, time.perf_counter() - start)
 
         return {"messages": [final_message]}
 
 
     async def summarizer_node(self, state:State):
         latest_messages = state["messages"][:-20]
+        logger.info("[%s] summarize_conversation: summarizing %d older messages", self.name, len(latest_messages))
+        start = time.perf_counter()
 
         previous_summary = state["summary"]
 
@@ -73,6 +87,8 @@ class ChatAgent(Agent):
         {previous_summary or "(No previous summary)"}
         """.strip()
         response = await self.llm.ainvoke(latest_messages + [HumanMessage(content=summary_message)])
+        logger.info("[%s] summarize_conversation: done in %.2fs, removed %d messages", self.name, time.perf_counter() - start, len(latest_messages))
+        logger.debug("[%s] summarize_conversation: new summary:\n%s", self.name, response.content)
 
         return {"summary": response.content, "messages": [
             RemoveMessage(id=message.id)
@@ -82,6 +98,8 @@ class ChatAgent(Agent):
     async def response_node(self, state: State):
         summary = state.get("summary", "")
         messages = state.get("messages", [])
+        logger.info("[%s] response_generator: generating final response (summary %s)", self.name, "included" if summary else "none")
+        start = time.perf_counter()
 
         # Inject summary as system context so it is not lost.
         llm_input = messages
@@ -89,6 +107,7 @@ class ChatAgent(Agent):
             llm_input = [SystemMessage(content=f"Conversation summary:\n{summary}")] + messages
 
         response = await self.llm.ainvoke(llm_input)
+        logger.info("[%s] response_generator: done in %.2fs", self.name, time.perf_counter() - start)
         return {"messages": [AIMessage(content=response.content)]}
 
 
@@ -123,8 +142,10 @@ class ChatAgent(Agent):
     def should_continue(self, state: State):
         messages = state["messages"]
         if len(messages) > 20:
+            logger.info("[%s] route: %d messages > 20 -> summarize_conversation", self.name, len(messages))
             return "summarize_conversation"
         else:
+            logger.info("[%s] route: %d messages -> agent", self.name, len(messages))
             return "agent"
 
     async def start_chat(self, message: str, state: State | dict | None = None) -> str:
@@ -142,8 +163,11 @@ class ChatAgent(Agent):
             state = {"messages": [], "summary": ""}
 
         state["messages"] = list(state.get("messages", [])) + [HumanMessage(content=message)]
+        logger.info("[%s] query received: %s", self.name, message)
+        start = time.perf_counter()
 
         result = await self.graph.ainvoke(state)
+        logger.info("[%s] query completed in %.2fs", self.name, time.perf_counter() - start)
 
         # Persist the graph output back into the caller's state so that
         # subsequent turns continue from the full (possibly summarized) history.
