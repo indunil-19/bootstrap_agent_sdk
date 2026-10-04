@@ -1,16 +1,58 @@
-# This is a sample Python script.
+"""Test script for the ChatAgent from the agent_lib."""
 
-# Press Shift+F10 to execute it or replace it with your code.
-# Press Double Shift to search everywhere for classes, files, tool windows, actions, and settings.
+import asyncio
+import logging
+import os
+
+from dotenv import load_dotenv
+from langchain_core.messages import HumanMessage
+from langchain_core.tools import tool
+
+from net.kairachat.agent.llm_agent import ChatAgent
+
+load_dotenv()
+logging.basicConfig(level=logging.INFO)
 
 
-def print_hi(name):
-    # Use a breakpoint in the code line below to debug your script.
-    print(f'Hi, {name}')  # Press Ctrl+F8 to toggle the breakpoint.
+# --- Define some simple tools for the agent to use ---
+@tool
+def add(a: int, b: int) -> int:
+    """Add two integers and return the result."""
+    return a + b
 
 
-# Press the green button in the gutter to run the script.
-if __name__ == '__main__':
-    print_hi('PyCharm')
+@tool
+def get_weather(city: str) -> str:
+    """Return a fake weather report for the given city."""
+    return f"The weather in {city} is sunny and 25°C."
 
-# See PyCharm help at https://www.jetbrains.com/help/pycharm/
+
+async def main():
+    # Make sure your model provider key is set, e.g.:
+    #   setx OPENAI_API_KEY "sk-..."   (then restart the terminal)
+    if not os.getenv("OPENAI_API_KEY"):
+        print("WARNING: OPENAI_API_KEY is not set. The LLM call will fail.")
+
+    config_path = os.path.join(os.path.dirname(__file__), "agent_config.json")
+
+    agent = ChatAgent(
+        name="test-agent",
+        config_path=config_path,
+        tools=[add, get_weather],
+    )
+
+    # Build the initial state and invoke the agent node
+    state = {
+        "messages": [HumanMessage(content="What is 21 + 21, and what's the weather in Paris?")],
+        "summary": "",
+    }
+
+    result = await agent.agent_node(state)
+
+    print("\n=== Agent response ===")
+    print(result["messages"][-1].content)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+
