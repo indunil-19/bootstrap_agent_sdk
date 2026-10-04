@@ -5,6 +5,7 @@ import logging
 import os
 
 from dotenv import load_dotenv
+from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
 
 from net.kairachat.agent.llm_agent import ChatAgent
@@ -25,27 +26,36 @@ def get_weather(city: str) -> str:
     return f"The weather in {city} is sunny and 25°C."
 
 
+@tool
+def get_user_name(config: RunnableConfig) -> str:
+    """Return the name of the current user."""
+    return config["configurable"]["payload"].get("user_name", "unknown")
+
+
 async def main():
     config_path = os.path.join(os.path.dirname(__file__), "agent_config.json")
 
     agent = ChatAgent(
         name="graph-test-agent",
         config_path=config_path,
-        tools=[add, get_weather],
+        tools=[add, get_weather, get_user_name],
     )
 
-    # Keep a single state so the conversation has memory across turns
-    state = {"messages": [], "summary": ""}
+    # The caller owns the chat history and passes it in on every turn
+    chat_history = []
+    payload = {"user_name": "Indunil"}
 
     prompts = [
         "What is 21 + 21?",
         "And what's the weather in Paris?",
+        "What is my name?",
     ]
 
     for prompt in prompts:
         print(f"\nUser: {prompt}")
-        reply = await agent.start_chat(prompt, state)
+        reply = await agent.start_chat(prompt, chat_id="graph-test-chat", payload=payload, chat_history=chat_history)
         print(f"Assistant: {reply}")
+        chat_history += [{"role": "user", "content": prompt}, {"role": "assistant", "content": reply}]
 
 
 if __name__ == "__main__":

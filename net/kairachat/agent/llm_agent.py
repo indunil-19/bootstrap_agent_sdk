@@ -2,7 +2,8 @@ import logging
 import time
 
 from langchain.chat_models import init_chat_model
-from langchain_core.messages import HumanMessage, AIMessage, RemoveMessage, SystemMessage, ToolMessage
+from langchain_core.messages import HumanMessage, AIMessage, RemoveMessage, SystemMessage, ToolMessage, convert_to_messages
+from langchain_core.runnables import RunnableConfig
 from langgraph.constants import START, END
 from langgraph.graph import StateGraph
 from langgraph.prebuilt import create_react_agent
@@ -38,11 +39,12 @@ class ChatAgent(Agent):
 
 
 
-    async def agent_node(self, state:State):
+    async def agent_node(self, state:State, config: RunnableConfig):
         logger.info("[%s] agent: running ReAct agent with %d messages", self.name, len(state["messages"]))
         start = time.perf_counter()
 
-        agent_response = await self.agent.ainvoke(state)
+        # Pass the run config through so tools receive the payload and the recursion limit applies
+        agent_response = await self.agent.ainvoke(state, config=config)
 
         # Log the intermediate ReAct steps (tool calls and tool results) produced for this query
         for message in agent_response["messages"][len(state["messages"]):]:
@@ -169,32 +171,39 @@ class ChatAgent(Agent):
             logger.info("[%s] route: %d messages -> agent", self.name, len(messages))
             return "agent"
 
-    async def start_chat(self, message: str, state: State | dict | None = None) -> str:
+    async def start_chat(self, message: str, chat_id: str, payload: dict | None = None,
+                         chat_history: list | None = None) -> str:
         """Run one turn of the conversation through the compiled graph.
 
         Args:
             message: The user's input message.
-            state: Optional existing state to continue a conversation. When not
-                provided, a fresh state is created.
+            chat_id: Identifier of the conversation, passed as the LangGraph thread_id.
+            payload: Optional caller data, passed to nodes and tools via
+                config["configurable"]["payload"]. The converted chat_history is added
+                to it under the "chat_history" key.
+            chat_history: Optional previous messages of the conversation, as LangChain
+                messages or dicts like {"role": "user", "content": "..."}.
 
         Returns:
             The assistant's final response content.
         """
-        if state is None:
-            state = {"messages": [], "summary": ""}
-
-        state["messages"] = list(state.get("messages", [])) + [HumanMessage(content=message)]
-        logger.info("[%s] query received: %s", self.name, message)
+        history = convert_to_messages(chat_history or [])
+        # Copy so the caller's payload is not mutated; tools can read the history via the payload too
+        payload = {**(payload or {}), "chat_history": history}
+        state = {
+            "messages": history + [HumanMessage(content=message)],
+            "summary": "",
+            "payload": payload,
+        }
+        config = {
+            "configurable": {"thread_id": chat_id, "payload": payload},
+            "recursion_limit": self.config.get("recursion_limit", 50),
+        }
+        logger.info("[%s] [chat %s] query received: %s", self.name, chat_id, message)
         start = time.perf_counter()
 
-        result = await self.graph.ainvoke(state)
-        logger.info("[%s] query completed in %.2fs", self.name, time.perf_counter() - start)
-
-        # Persist the graph output back into the caller's state so that
-        # subsequent turns continue from the full (possibly summarized) history.
-        state["messages"] = result["messages"]
-        if "summary" in result:
-            state["summary"] = result["summary"]
+        result = await self.graph.ainvoke(state, config=config)
+        logger.info("[%s] [chat %s] query completed in %.2fs", self.name, chat_id, time.perf_counter() - start)
 
         return result["messages"][-1].content
 

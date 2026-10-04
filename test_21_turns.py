@@ -1,7 +1,7 @@
 """Run a 21-turn conversation against the ChatAgent graph.
 
-With more than 20 messages in state, should_continue() routes through the
-summarize_conversation node, so this exercises the summarizer branch too.
+Once the chat history passed in exceeds 20 messages, should_continue() routes
+through the summarize_conversation node, so this exercises the summarizer branch too.
 """
 
 import asyncio
@@ -38,8 +38,8 @@ async def main():
         tools=[add, get_weather],
     )
 
-    # One shared state so the whole 21-turn conversation accumulates history
-    state = {"messages": [], "summary": ""}
+    # The caller owns the chat history and passes it in on every turn
+    chat_history = []
 
     prompts = [
         "Hi, my name is Indunil.",
@@ -67,11 +67,11 @@ async def main():
 
     for i, prompt in enumerate(prompts, start=1):
         print(f"\n[Turn {i}] User: {prompt}")
-        reply = await agent.start_chat(prompt, state)
+        reply = await agent.start_chat(prompt, chat_id="21-turn-test-chat", chat_history=chat_history)
         print(f"[Turn {i}] Assistant: {reply}")
+        chat_history += [{"role": "user", "content": prompt}, {"role": "assistant", "content": reply}]
 
-    print(f"\nTotal messages in state: {len(state['messages'])}")
-    print(f"Conversation summary:\n{state.get('summary') or '(none)'}")
+    print(f"\nTotal messages in chat history: {len(chat_history)}")
 
 
 if __name__ == "__main__":
