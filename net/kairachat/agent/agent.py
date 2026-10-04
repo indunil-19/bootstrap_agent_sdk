@@ -1,3 +1,6 @@
+import logging
+
+
 class Agent:
     def __init__(self, name, config_path, tools, log_level=logging.INFO):
         self.name = name
