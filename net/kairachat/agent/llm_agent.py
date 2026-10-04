@@ -102,7 +102,7 @@ class ChatAgent(Agent):
     async def response_node(self, state: State):
         summary = state.get("summary", "")
         messages = state.get("messages", [])
-        logger.info("[%s] response_generator: generating final response (summary %s)", self.name, "included" if summary else "none")
+        logger.info("[%s] response_generator: generating final response", self.name)
         start = time.perf_counter()
 
         # Inject summary as system context so it is not lost.
