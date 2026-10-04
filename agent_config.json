@@ -2,6 +2,7 @@
   "llm_model": "openai:gpt-oss-120b",
   "llm_base_url": "https://api.ai.kodekloud.com/v1",
   "llm_temperature": 0.0,
-  "agent_instructions": "You are a helpful assistant. Use the available tools when they can help answer the user's question. Be concise and accurate."
+  "agent_instructions": "You are a helpful assistant. Use the available tools when they can help answer the user's question. Be concise and accurate.",
+  "response_instructions": "Respond in a friendly, conversational tone. Keep answers short (one to three sentences) unless the user asks for more detail. Use metric units."
 }
 

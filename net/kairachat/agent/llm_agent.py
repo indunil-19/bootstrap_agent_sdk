@@ -105,10 +105,27 @@ class ChatAgent(Agent):
         logger.info("[%s] response_generator: generating final response", self.name)
         start = time.perf_counter()
 
-        # Inject summary as system context so it is not lost.
-        llm_input = messages
-        if summary:
-            llm_input = [SystemMessage(content=f"Conversation summary:\n{summary}")] + messages
+        system_prompt = f"""
+        You are generating the final response to the user's latest message.
+
+        Below is the summary of the conversation so far, covering earlier messages that are no longer
+        shown. The messages that follow this instruction are the newer messages of the conversation.
+        Using both the summary and the new messages, write the final response to the user's latest message.
+
+        The most recent assistant message was produced by an agent with tool access and reflects real
+        tool results. Treat it as accurate: do not contradict it, and do not claim you cannot access
+        information it provides, and do not add details that are not in the summary or the messages.
+
+        Conversation summary so far:
+        {summary or "(No summary yet)"}
+        """.strip()
+
+        # Optional deployment-specific instructions from the agent config.
+        response_instructions = self.config.get("response_instructions")
+        if response_instructions:
+            system_prompt += f"\n\n**Specific Instructions**:\n{response_instructions}"
+
+        llm_input = [SystemMessage(content=system_prompt)] + messages
 
         response = await self.llm.ainvoke(llm_input)
         logger.info("[%s] response_generator: done in %.2fs", self.name, time.perf_counter() - start)
