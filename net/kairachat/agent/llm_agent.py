@@ -13,6 +13,10 @@ from net.kairachat.agent.models.State import State
 
 logger = logging.getLogger(__name__)
 
+# Once history exceeds SUMMARY_TRIGGER messages, the oldest SUMMARY_TRIGGER messages are
+# summarized and removed; the rest are kept until history exceeds SUMMARY_TRIGGER again.
+SUMMARY_TRIGGER = 20
+
 class ChatAgent(Agent):
     def __init__(self, name, config_path, tools, log_level=logging.INFO):
 
@@ -55,7 +59,7 @@ class ChatAgent(Agent):
 
 
     async def summarizer_node(self, state:State):
-        latest_messages = state["messages"][:-20]
+        latest_messages = state["messages"][:SUMMARY_TRIGGER]
         logger.info("[%s] summarize_conversation: summarizing %d older messages", self.name, len(latest_messages))
         start = time.perf_counter()
 
@@ -141,8 +145,8 @@ class ChatAgent(Agent):
 
     def should_continue(self, state: State):
         messages = state["messages"]
-        if len(messages) > 20:
-            logger.info("[%s] route: %d messages > 20 -> summarize_conversation", self.name, len(messages))
+        if len(messages) > SUMMARY_TRIGGER:
+            logger.info("[%s] route: %d messages > %d -> summarize_conversation", self.name, len(messages), SUMMARY_TRIGGER)
             return "summarize_conversation"
         else:
             logger.info("[%s] route: %d messages -> agent", self.name, len(messages))
