@@ -10,6 +10,7 @@ from langgraph.prebuilt import create_react_agent
 
 from net.kairachat.agent.agent import Agent
 from net.kairachat.agent.config.Agent_config import AgentConfig
+from net.kairachat.agent.http_tools import build_http_tools
 from net.kairachat.agent.mcp_loader import load_mcp_tools_from_config
 from net.kairachat.agent.models.State import State
 
@@ -32,6 +33,9 @@ class ChatAgent(Agent):
             self.config.get("llm_base_url", None),
         )
 
+        # HTTP tools need no network at build time, so they load here for both ChatAgent(...) and create()
+        self.tools = list(self.tools or []) + build_http_tools(self.config.get("http_tools"))
+
         self._build_agent()
 
     @classmethod
@@ -51,7 +55,7 @@ class ChatAgent(Agent):
         tool_names = [getattr(tool, "name", None) or tool.__name__ for tool in self.tools]
         duplicates = sorted({tool_name for tool_name in tool_names if tool_names.count(tool_name) > 1})
         if duplicates:
-            raise ValueError(f"Duplicate tool names: {duplicates}. Tool names must be unique across local and MCP tools.")
+            raise ValueError(f"Duplicate tool names: {duplicates}. Tool names must be unique across local, HTTP and MCP tools.")
 
         self.llm_with_tools = self.llm.bind_tools(self.tools)
         self.agent = create_react_agent(self.llm_with_tools, tools=self.tools, prompt=self.config.get("agent_instructions", ""))
