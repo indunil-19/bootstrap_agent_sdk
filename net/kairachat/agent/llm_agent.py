@@ -166,16 +166,25 @@ class ChatAgent(Agent):
         logger.info("[%s] response_generator: generating final response", self.name)
         start = time.perf_counter()
 
+        user_query = next((m.content for m in reversed(messages) if isinstance(m, HumanMessage)), "")
+
         system_prompt = f"""
-        You are generating the final response to the user's latest message.
+        You are writing the final reply to the user's latest message.
 
-        Below is the summary of the conversation so far, covering earlier messages that are no longer
-        shown. The messages that follow this instruction are the newer messages of the conversation.
-        Using both the summary and the new messages, write the final response to the user's latest message.
+        The user's latest message is:
+        "{user_query}"
 
-        The most recent assistant message was produced by an agent with tool access and reflects real
-        tool results. Treat it as accurate: do not contradict it, and do not claim you cannot access
-        information it provides, and do not add details that are not in the summary or the messages.
+        The messages that follow this instruction are the newer messages of the conversation. Earlier
+        messages are no longer shown and are covered by the conversation summary below.
+
+        The LAST message in the conversation is a DRAFT ANSWER written by an assistant with tool access.
+        It is not from the user, so do not reply to it, thank it, or react to it.
+        Rewrite the draft into the final reply to the user's latest message:
+        - Answer exactly what the user asked, using the facts in the draft answer.
+        - The draft reflects real tool results. Keep every fact, number and name exactly as in the draft.
+          Do not contradict it, and do not say you cannot access information it provides.
+        - Do not add facts that are not in the draft, the messages or the summary.
+        - If the draft says something could not be found or done, tell the user that.
 
         Conversation summary so far:
         {summary or "(No summary yet)"}
@@ -255,7 +264,9 @@ class ChatAgent(Agent):
         # Optional deployment-specific instructions from the agent config.
         response_instructions = self.config.get("response_instructions")
         if response_instructions:
-            system_prompt += f"\n\n**Specific Instructions**:\n{response_instructions}"
+            system_prompt += ("\n\n**Response style instructions** (these only change the tone, length and format "
+                              "of your reply, never its facts or what it answers):\n"
+                              f"{response_instructions}")
         return system_prompt
 
 
