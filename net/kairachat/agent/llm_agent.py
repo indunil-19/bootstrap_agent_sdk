@@ -11,6 +11,8 @@ from langgraph.prebuilt import create_react_agent
 from net.kairachat.agent.agent import Agent
 from net.kairachat.agent.config.Agent_config import AgentConfig
 from net.kairachat.agent.http_tools import build_http_tools
+from net.kairachat.agent.intents import (DEFAULT_HISTORY_MESSAGES, NO_INTENT, build_classifier_prompt,
+                                         build_intent_model, build_refusal_prompt, load_intent_settings)
 from net.kairachat.agent.mcp_loader import load_mcp_tools_from_config
 from net.kairachat.agent.models.State import State
 
@@ -57,19 +59,51 @@ class ChatAgent(Agent):
         if duplicates:
             raise ValueError(f"Duplicate tool names: {duplicates}. Tool names must be unique across local, HTTP and MCP tools.")
 
+        agent_instructions = self.config.get("agent_instructions", "")
         self.llm_with_tools = self.llm.bind_tools(self.tools)
-        self.agent = create_react_agent(self.llm_with_tools, tools=self.tools, prompt=self.config.get("agent_instructions", ""))
+        self.agent = create_react_agent(self.llm_with_tools, tools=self.tools, prompt=agent_instructions)
+
+        # Intent classification: one ReAct agent per "agent"-route intent, with only that intent's tools
+        # and instructions. Messages classified as "none" use the full agent above.
+        self.intent_settings = load_intent_settings(self.config.get("intent_classification"), tool_names)
+        self.intents = {}
+        self.intent_agents = {}
+        if self.intent_settings:
+            self.intents = self.intent_settings["intents"]
+            self.intent_classifier = self.llm.with_structured_output(build_intent_model(list(self.intents)))
+
+            for intent_name, intent in self.intents.items():
+                if intent.get("route", "agent") != "agent":
+                    continue
+                intent_tools = self.tools
+                if "tools" in intent:
+                    intent_tools = [tool for tool, tool_name in zip(self.tools, tool_names) if tool_name in intent["tools"]]
+                prompt = agent_instructions
+                if intent.get("instructions"):
+                    prompt = f"{prompt}\n\n{intent['instructions']}".strip()
+                llm = self.llm.bind_tools(intent_tools) if intent_tools else self.llm
+                self.intent_agents[intent_name] = create_react_agent(llm, tools=intent_tools, prompt=prompt)
+
+            logger.info("[%s] intent classification enabled: %s", self.name,
+                        {name: intent.get("route", "agent") for name, intent in self.intents.items()})
 
         self._build_graph()
         logger.info("[%s] agent ready with tools: %s", self.name, tool_names)
 
 
     async def agent_node(self, state:State, config: RunnableConfig):
+        intent = state.get("intent")
+        agent = self.intent_agents.get(intent, self.agent)
         logger.info("[%s] agent: running ReAct agent with %d messages", self.name, len(state["messages"]))
         start = time.perf_counter()
 
+        # Make the intent available to tools through the payload
+        payload = config.get("configurable", {}).get("payload")
+        if intent and payload is not None:
+            payload["intent"] = intent
+
         # Pass the run config through so tools receive the payload and the recursion limit applies
-        agent_response = await self.agent.ainvoke(state, config=config)
+        agent_response = await agent.ainvoke(state, config=config)
 
         # Log the intermediate ReAct steps (tool calls and tool results) produced for this query
         for message in agent_response["messages"][len(state["messages"]):]:
@@ -147,16 +181,82 @@ class ChatAgent(Agent):
         {summary or "(No summary yet)"}
         """.strip()
 
-        # Optional deployment-specific instructions from the agent config.
-        response_instructions = self.config.get("response_instructions")
-        if response_instructions:
-            system_prompt += f"\n\n**Specific Instructions**:\n{response_instructions}"
-
-        llm_input = [SystemMessage(content=system_prompt)] + messages
+        llm_input = [SystemMessage(content=self._add_response_instructions(system_prompt))] + messages
 
         response = await self.llm.ainvoke(llm_input)
         logger.info("[%s] response_generator: done in %.2fs", self.name, time.perf_counter() - start)
         return {"messages": [AIMessage(content=response.content)]}
+
+    async def classify_intent_node(self, state: State):
+        history_messages = self.intent_settings.get("history_messages", DEFAULT_HISTORY_MESSAGES)
+        messages = state["messages"][-(history_messages + 1):]
+        start = time.perf_counter()
+
+        system_prompt = build_classifier_prompt(self.intents, state.get("summary", ""))
+        try:
+            result = await self.intent_classifier.ainvoke([SystemMessage(content=system_prompt)] + messages)
+            intent, reason = result.intent, result.reason
+        except Exception as e:
+            # A failed classification must not break the chat; fall back to the normal agent
+            logger.warning("[%s] classify_intent: failed (%s: %s), using '%s'", self.name, type(e).__name__, e, NO_INTENT)
+            intent, reason = NO_INTENT, "classification failed"
+
+        route = self.intents.get(intent, {}).get("route", "agent")
+        if route != "agent":
+            tools = "no tools"
+        elif "tools" in self.intents.get(intent, {}):
+            tools = ", ".join(self.intents[intent]["tools"])
+        else:
+            tools = "all tools"
+        logger.info("[%s] classify_intent: %s -> %s [%s] in %.2fs (reason: %s)", self.name, intent, route,
+                    tools, time.perf_counter() - start, reason)
+        return {"intent": intent}
+
+    async def direct_response_node(self, state: State):
+        intent = self.intents[state["intent"]]
+        logger.info("[%s] direct_response: replying without tools", self.name)
+
+        if intent.get("message"):
+            return {"messages": [AIMessage(content=intent["message"])]}
+
+        start = time.perf_counter()
+        system_prompt = f"""
+        Reply to the user's latest message directly. You have no tools in this step.
+
+        Below is the summary of the conversation so far, covering earlier messages that are no longer
+        shown. The messages that follow this instruction are the newer messages of the conversation.
+
+        Conversation summary so far:
+        {state.get("summary", "") or "(No summary yet)"}
+        """.strip()
+        if intent.get("instructions"):
+            system_prompt += f"\n\n{intent['instructions']}"
+
+        llm_input = [SystemMessage(content=self._add_response_instructions(system_prompt))] + state["messages"]
+        response = await self.llm.ainvoke(llm_input)
+        logger.info("[%s] direct_response: done in %.2fs", self.name, time.perf_counter() - start)
+        return {"messages": [AIMessage(content=response.content)]}
+
+    async def refuse_node(self, state: State):
+        intent = self.intents[state["intent"]]
+        logger.info("[%s] refuse: declining the request", self.name)
+
+        if intent.get("message"):
+            return {"messages": [AIMessage(content=intent["message"])]}
+
+        start = time.perf_counter()
+        system_prompt = self._add_response_instructions(build_refusal_prompt(self.intents))
+        # Only the latest message is sent, so the model has nothing else to answer
+        response = await self.llm.ainvoke([SystemMessage(content=system_prompt), state["messages"][-1]])
+        logger.info("[%s] refuse: done in %.2fs", self.name, time.perf_counter() - start)
+        return {"messages": [AIMessage(content=response.content)]}
+
+    def _add_response_instructions(self, system_prompt: str) -> str:
+        # Optional deployment-specific instructions from the agent config.
+        response_instructions = self.config.get("response_instructions")
+        if response_instructions:
+            system_prompt += f"\n\n**Specific Instructions**:\n{response_instructions}"
+        return system_prompt
 
 
 
@@ -180,12 +280,23 @@ class ChatAgent(Agent):
         workflow.add_node("summarize_conversation", self.summarizer_node)
         workflow.add_node("response_generator", self.response_node)
 
+        if self.intent_settings:
+            workflow.add_node("classify_intent", self.classify_intent_node)
+            workflow.add_node("direct_response", self.direct_response_node)
+            workflow.add_node("refuse", self.refuse_node)
+            workflow.add_conditional_edges("classify_intent", self.route_by_intent)
+            workflow.add_edge("direct_response", END)
+            workflow.add_edge("refuse", END)
+
         workflow.add_conditional_edges(START, self.should_continue)
-        workflow.add_edge("summarize_conversation", "agent")
+        workflow.add_edge("summarize_conversation", self._first_step())
         workflow.add_edge("agent", "response_generator")
         workflow.add_edge("response_generator", END)
 
         self.graph = workflow.compile()
+
+    def _first_step(self):
+        return "classify_intent" if self.intent_settings else "agent"
 
     def should_continue(self, state: State):
         messages = state["messages"]
@@ -193,8 +304,12 @@ class ChatAgent(Agent):
             logger.info("[%s] route: %d messages > %d -> summarize_conversation", self.name, len(messages), SUMMARY_TRIGGER)
             return "summarize_conversation"
         else:
-            logger.info("[%s] route: %d messages -> agent", self.name, len(messages))
-            return "agent"
+            logger.info("[%s] route: %d messages -> %s", self.name, len(messages), self._first_step())
+            return self._first_step()
+
+    def route_by_intent(self, state: State):
+        route = self.intents.get(state["intent"], {}).get("route", "agent")
+        return {"agent": "agent", "direct": "direct_response", "refuse": "refuse"}[route]
 
     async def start_chat(self, message: str, chat_id: str, payload: dict | None = None,
                          chat_history: list | None = None) -> str:
