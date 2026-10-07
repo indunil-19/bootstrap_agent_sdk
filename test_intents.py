@@ -110,29 +110,29 @@ def write_config(intent_classification: dict | None) -> str:
     return config_file.name
 
 
-def expect_config_error(name: str, intent_classification: dict, expected_text: str):
+async def expect_config_error(name: str, intent_classification: dict, expected_text: str):
     try:
-        ChatAgent(name="config-test", config_path=write_config(intent_classification), tools=[add, get_weather])
+        await ChatAgent.create(name="config-test", config_path=write_config(intent_classification), tools=[add, get_weather])
         check(name, False, "no error raised")
     except ValueError as e:
         check(name, expected_text in str(e), str(e))
 
 
-def config_tests():
+async def config_tests():
     print("\n=== Part 1: config validation ===")
-    expect_config_error("reserved name 'none'",
+    await expect_config_error("reserved name 'none'",
                         {"enabled": True, "intents": {"none": {"description": "x"}}}, "reserved")
-    expect_config_error("unknown tool name",
+    await expect_config_error("unknown tool name",
                         {"enabled": True, "intents": {"math": {"description": "x", "tools": ["multiply"]}}}, "unknown tools")
-    expect_config_error("tools on a direct intent",
+    await expect_config_error("tools on a direct intent",
                         {"enabled": True, "intents": {"hi": {"description": "x", "route": "direct", "tools": ["add"]}}},
                         "only be used with the 'agent' route")
-    expect_config_error("unknown route",
+    await expect_config_error("unknown route",
                         {"enabled": True, "intents": {"hi": {"description": "x", "route": "handoff"}}}, "route must be one of")
-    expect_config_error("enabled with no intents", {"enabled": True, "intents": {}}, "no intents")
+    await expect_config_error("enabled with no intents", {"enabled": True, "intents": {}}, "no intents")
 
-    disabled = ChatAgent(name="disabled", config_path=write_config({"enabled": False, "intents": INTENTS}), tools=[add])
-    no_block = ChatAgent(name="no-block", config_path=write_config(None), tools=[add])
+    disabled = await ChatAgent.create(name="disabled", config_path=write_config({"enabled": False, "intents": INTENTS}), tools=[add])
+    no_block = await ChatAgent.create(name="no-block", config_path=write_config(None), tools=[add])
     check("enabled: false gives the same graph as no block",
           set(disabled.graph.nodes) == set(no_block.graph.nodes) and "classify_intent" not in disabled.graph.nodes,
           str(sorted(disabled.graph.nodes)))
@@ -141,7 +141,7 @@ def config_tests():
 async def conversation_test():
     print("\n=== Part 2: conversation ===")
     config_path = write_config({"enabled": True, "intents": INTENTS})
-    agent = ChatAgent(name="intent-test-agent", config_path=config_path, tools=[add, get_weather, find_store])
+    agent = await ChatAgent.create(name="intent-test-agent", config_path=config_path, tools=[add, get_weather, find_store])
 
     recorder = LogRecorder()
     logging.getLogger("net.kairachat.agent.llm_agent").addHandler(recorder)
@@ -174,7 +174,7 @@ async def conversation_test():
 
 
 async def main():
-    config_tests()
+    await config_tests()
     await conversation_test()
 
     print("\n=== Summary ===")

@@ -35,7 +35,7 @@ async def main():
 
     config_path = os.path.join(os.path.dirname(__file__), "agent_config.json")
 
-    agent = ChatAgent(
+    agent = await ChatAgent.create(
         name="test-agent",
         config_path=config_path,
         tools=[add, get_weather],
@@ -47,7 +47,7 @@ async def main():
         "summary": "",
     }
 
-    result = await agent.agent_node(state)
+    result = await agent.agent_node(state, config={"configurable": {}})
 
     print("\n=== Agent response ===")
     print(result["messages"][-1].content)

@@ -162,7 +162,7 @@ async def agent_test():
     json.dump(config, config_file)
     config_file.close()
 
-    agent = ChatAgent(name="http-test-agent", config_path=config_file.name, tools=[])
+    agent = await ChatAgent.create(name="http-test-agent", config_path=config_file.name, tools=[])
 
     for prompt in ["What's the weather in Paris right now?",
                    "How many euros is 1 US dollar today?",

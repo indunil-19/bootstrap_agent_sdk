@@ -27,30 +27,25 @@ class ChatAgent(Agent):
 
         super().__init__(name, config_path, tools, log_level)
 
-        self.config = AgentConfig(config_path=config_path)
-
-        self.llm = self.create_llm(
-            self.config.get("llm_model", ""),
-            self.config.get("llm_temperature", ""),
-            self.config.get("llm_base_url", None),
-        )
-
-        # HTTP tools need no network at build time, so they load here for both ChatAgent(...) and create()
-        self.tools = list(self.tools or []) + build_http_tools(self.config.get("http_tools"))
-
-        self._build_agent()
-
     @classmethod
     async def create(cls, name, config_path, tools=None, log_level=logging.INFO):
-        """Create a ChatAgent with the given local tools plus the MCP tools declared
-        under "mcp_servers" in the agent config."""
+        """Create a ChatAgent with the given local tools plus the HTTP and MCP tools declared
+        under "http_tools" and "mcp_servers" in the agent config."""
         agent = cls(name, config_path, list(tools or []), log_level)
 
-        mcp_tools = await load_mcp_tools_from_config(agent.config.get("mcp_servers"))
-        if mcp_tools:
-            agent.tools = agent.tools + mcp_tools
-            agent._build_agent()
+        agent.config = AgentConfig(config_path=config_path)
 
+        agent.llm = agent.create_llm(
+            agent.config.get("llm_model", ""),
+            agent.config.get("llm_temperature", ""),
+            agent.config.get("llm_base_url", None),
+        )
+
+        agent.tools = (agent.tools
+                       + build_http_tools(agent.config.get("http_tools"))
+                       + await load_mcp_tools_from_config(agent.config.get("mcp_servers")))
+
+        agent._build_agent()
         return agent
 
     def _build_agent(self):

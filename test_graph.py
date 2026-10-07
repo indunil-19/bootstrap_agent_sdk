@@ -35,7 +35,7 @@ def get_user_name(config: RunnableConfig) -> str:
 async def main():
     config_path = os.path.join(os.path.dirname(__file__), "agent_config.json")
 
-    agent = ChatAgent(
+    agent = await ChatAgent.create(
         name="graph-test-agent",
         config_path=config_path,
         tools=[add, get_weather, get_user_name],
