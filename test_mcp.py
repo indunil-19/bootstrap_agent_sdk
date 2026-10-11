@@ -1,7 +1,8 @@
 """Test loading MCP tools from the agent config via ChatAgent.create().
 
 Starts mcp_test_server.py over stdio. The config selects only two of its three
-tools, so this also checks that unselected tools are not loaded.
+tools, so this also checks that unselected tools are not loaded. It also checks that the JSON data
+(structuredContent) of MCP results becomes the tool artifact that rich UIs receive.
 """
 
 import asyncio
@@ -55,7 +56,17 @@ async def main():
     print(f"\nLoaded tools: {tool_names}")
     assert tool_names == ["add", "get_capital", "multiply"], tool_names
 
-    for prompt in ["What is 6 times 7?", "What is the capital of Japan?", "What is 10 + 5?"]:
+    # MCP structuredContent becomes the plain JSON artifact (unwrapped), as for local and HTTP tools
+    multiply = next(t for t in agent.tools if t.name == "multiply")
+    message = await multiply.ainvoke({"type": "tool_call", "id": "1", "name": "multiply", "args": {"a": 6, "b": 7}})
+    print(f"\nmultiply artifact: {message.artifact}")
+    assert message.artifact == {"result": 42}, message.artifact
+
+    result = await agent.chat("What is 6 times 7?", chat_id="mcp-test-chat")
+    print(f"\nchat() tool_outputs: {result['tool_outputs']}")
+    assert [(o["name"], o["data"]) for o in result["tool_outputs"]] == [("multiply", {"result": 42})], result
+
+    for prompt in ["What is the capital of Japan?", "What is 10 + 5?"]:
         print(f"\nUser: {prompt}")
         print(f"Assistant: {await agent.start_chat(prompt, chat_id='mcp-test-chat')}")
 
