@@ -197,6 +197,11 @@ class Pipe:
                             # Fixed replies (direct/refuse intents) arrive only here, without deltas
                             if not streamed:
                                 yield data["text"]
+                            usage = data.get("usage")  # None if "token_usage" is false in the agent config
+                            if usage:
+                                steps = " · ".join(f"{name} {step['total_tokens']:,}" for name, step in usage["by_step"].items())
+                                await emit_event({"type": "status", "data": {
+                                    "description": f"{usage['total_tokens']:,} tokens ({steps})", "done": True}})
                             return
 
                         elif kind == "run.error":

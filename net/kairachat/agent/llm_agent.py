@@ -17,6 +17,7 @@ from net.kairachat.agent.intents import (DEFAULT_HISTORY_MESSAGES, NO_INTENT, bu
                                          build_intent_model, build_refusal_prompt, load_intent_settings)
 from net.kairachat.agent.mcp_loader import load_mcp_tools_from_config
 from net.kairachat.agent.models.State import State
+from net.kairachat.agent.usage import TokenUsage
 
 logger = logging.getLogger(__name__)
 
@@ -293,9 +294,14 @@ class ChatAgent(Agent):
         if llm_base_url:
             kwargs["base_url"] = llm_base_url
 
-        return init_chat_model(
-            model=llm_model,
-            **kwargs,)
+        llm = init_chat_model(model=llm_model, **kwargs)
+        # Streamed replies (stream_chat) report token usage only with stream_usage on (OpenAI models)
+        if self._token_usage_enabled() and "stream_usage" in type(llm).model_fields:
+            llm = llm.model_copy(update={"stream_usage": True})
+        return llm
+
+    def _token_usage_enabled(self) -> bool:
+        return self.config.get("token_usage", True) is not False
 
     def _build_graph(self):
         workflow =  StateGraph(State)
@@ -336,8 +342,9 @@ class ChatAgent(Agent):
         return {"agent": "agent", "direct": "direct_response", "refuse": "refuse"}[route]
 
     def _prepare_turn(self, message: str, chat_id: str, payload: dict | None = None,
-                      chat_history: list | None = None) -> tuple[dict, RunnableConfig]:
-        """Build the initial graph state and run config for one turn (shared by chat and stream_chat)."""
+                      chat_history: list | None = None) -> tuple[dict, RunnableConfig, TokenUsage | None]:
+        """Build the initial graph state, run config and token counter (None if "token_usage" is
+        false in the config) for one turn (shared by chat and stream_chat)."""
         history = convert_to_messages(chat_history or [])
         # Copy so the caller's payload is not mutated; tools can read the history via the payload too
         payload = {**(payload or {}), "chat_history": history}
@@ -351,7 +358,16 @@ class ChatAgent(Agent):
             "configurable": {"thread_id": chat_id, "payload": payload},
             "recursion_limit": self.config.get("recursion_limit", 50),
         }
-        return state, config
+        usage = TokenUsage() if self._token_usage_enabled() else None
+        if usage:
+            config["callbacks"] = [usage]
+        return state, config, usage
+
+    def _usage_result(self, usage: TokenUsage | None, chat_id: str) -> dict | None:
+        if usage is None:
+            return None
+        logger.info("[%s] [chat %s] %s", self.name, chat_id, usage.log_line())
+        return usage.summary()
 
     async def chat(self, message: str, chat_id: str, payload: dict | None = None,
                    chat_history: list | None = None) -> dict:
@@ -367,18 +383,21 @@ class ChatAgent(Agent):
                 messages or dicts like {"role": "user", "content": "..."}.
 
         Returns:
-            {"text": final reply, "tool_outputs": [{"call_id", "name", "data"}, ...]}, where
+            {"text": final reply, "tool_outputs": [{"call_id", "name", "data"}, ...], "usage": ...}, where
             tool_outputs holds the artifacts of tools declared with
-            response_format="content_and_artifact" and call_id is the LLM tool call id.
+            response_format="content_and_artifact" and call_id is the LLM tool call id. usage is the
+            turn's token usage, {"input_tokens", "output_tokens", "total_tokens", "llm_calls",
+            "by_step": {node: {...}}}, or None if "token_usage" is false or the provider reports none.
         """
-        state, config = self._prepare_turn(message, chat_id, payload, chat_history)
+        state, config, usage = self._prepare_turn(message, chat_id, payload, chat_history)
         logger.info("[%s] [chat %s] query received: %s", self.name, chat_id, message)
         start = time.perf_counter()
 
         result = await self.graph.ainvoke(state, config=config)
         logger.info("[%s] [chat %s] query completed in %.2fs", self.name, chat_id, time.perf_counter() - start)
 
-        return {"text": result["messages"][-1].text, "tool_outputs": result.get("tool_outputs", [])}
+        return {"text": result["messages"][-1].text, "tool_outputs": result.get("tool_outputs", []),
+                "usage": self._usage_result(usage, chat_id)}
 
     async def start_chat(self, message: str, chat_id: str, payload: dict | None = None,
                          chat_history: list | None = None) -> str:
@@ -394,13 +413,13 @@ class ChatAgent(Agent):
             tool.started   {call_id, name, arguments}
             tool.finished  {call_id, name, status, content, data}  (data = tool artifact or None)
             message.delta  {message_id, text}                      (final reply tokens only)
-            run.finished   {text, tool_outputs}                    (authoritative result)
+            run.finished   {text, tool_outputs, usage}             (authoritative result; usage as in chat())
             run.error      {code, message}
         Exactly one of run.finished / run.error ends the stream. Here call_id is the tool
         invocation run id (the LLM tool call id is not known when a tool starts), so it pairs
         tool.started with tool.finished but differs from the call_id returned by chat().
         """
-        state, config = self._prepare_turn(message, chat_id, payload, chat_history)
+        state, config, usage = self._prepare_turn(message, chat_id, payload, chat_history)
         run_id = str(uuid4())
         message_id = str(uuid4())
         seq = 0
@@ -455,7 +474,8 @@ class ChatAgent(Agent):
             logger.info("[%s] [chat %s] stream query completed in %.2fs", self.name, chat_id, time.perf_counter() - start)
             # The final text replaces (not extends) the streamed deltas; fixed direct/refuse replies have no deltas
             yield event("run.finished", {"text": final_state["messages"][-1].text,
-                                         "tool_outputs": list(tool_outputs.values())})
+                                         "tool_outputs": list(tool_outputs.values()),
+                                         "usage": self._usage_result(usage, chat_id)})
         except asyncio.CancelledError:
             raise
         except Exception:
