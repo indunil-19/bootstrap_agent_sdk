@@ -89,12 +89,44 @@ def render_recipes(recipes: list) -> str:
     return page(f"<div class='grid'>{''.join(cards)}</div>")
 
 
+def render_trip_notes(data: dict) -> str:
+    # Artifact = the memory MCP server's structuredContent: {"entities": [...], "relations": [...]}
+    cards = "".join(
+        f"<article class='card'><h3>{html.escape(str(e.get('name', '')))}</h3>"
+        f"<div class='muted'>{html.escape(str(e.get('entityType', '')))}</div>"
+        f"<ul>{''.join(f'<li>{html.escape(str(o))}</li>' for o in e.get('observations', []))}</ul></article>"
+        for e in data.get("entities", [])
+    )
+    if not cards:
+        return ""
+    relations = "".join(
+        f"<li>{html.escape(str(r.get('from', '')))} → {html.escape(str(r.get('relationType', '')))}"
+        f" → {html.escape(str(r.get('to', '')))}</li>"
+        for r in data.get("relations", [])
+    )
+    links = f"<ul class='muted'>{relations}</ul>" if relations else ""
+    return page(f"<div class='muted'>📒 Trip notes</div><div class='grid'>{cards}</div>{links}")
+
+
+def render_added_notes(data: dict) -> str:
+    # Artifact of add_observations: {"results": [{"entityName", "addedObservations"}]}
+    return render_trip_notes({"entities": [
+        {"name": r.get("entityName", ""), "entityType": "added to notes", "observations": r.get("addedObservations", [])}
+        for r in data.get("results", []) if r.get("addedObservations")
+    ]})
+
+
 # Tool name -> HTML renderer. Tools without a renderer still work; they just show no card.
-# search_destinations is a local @tool in server.py; the others are HTTP tools from agent_config.json.
+# search_destinations is a local @tool in server.py; get_live_weather and search_recipes are HTTP tools
+# and the trip-notes tools come from the memory MCP server (all in agent_config.json).
 RENDERERS = {
     "search_destinations": render_destinations,
     "get_live_weather": render_live_weather,
     "search_recipes": render_recipes,
+    "create_entities": render_trip_notes,
+    "search_nodes": render_trip_notes,
+    "read_graph": render_trip_notes,
+    "add_observations": render_added_notes,
 }
 
 
@@ -150,8 +182,9 @@ class Pipe:
 
                         elif kind == "tool.finished":
                             renderer = RENDERERS.get(data["name"])
-                            if renderer and data["status"] == "success" and data["data"]:  # skip None and empty results
-                                embeds[data["call_id"]] = renderer(data["data"])
+                            card = renderer(data["data"]) if renderer and data["status"] == "success" and data["data"] else ""
+                            if card:  # skip None and empty results
+                                embeds[data["call_id"]] = card
                                 await emit_event({"type": "embeds", "data": {"embeds": list(embeds.values())}})
                             await emit_event({"type": "status", "data": {
                                 "description": f"{data['name']} finished", "done": True}})

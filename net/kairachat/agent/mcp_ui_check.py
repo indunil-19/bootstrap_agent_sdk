@@ -245,4 +245,7 @@ if __name__ == "__main__":
     except ImportError:
         pass
     logging.basicConfig(level=logging.WARNING)
-    asyncio.run(_main())
+    try:
+        asyncio.run(_main())
+    except ValueError as e:  # e.g. an unset ${VAR} in the config
+        raise SystemExit(f"error: {e}")

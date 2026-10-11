@@ -23,7 +23,7 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 
 # Demo data; a real application would call its own services here. Live weather and recipes come
-# from the HTTP tools in agent_config.json (Open-Meteo and DummyJSON).
+# from the HTTP tools in agent_config.json (Open-Meteo and DummyJSON), trip notes from the memory MCP server.
 DESTINATIONS = {
     "ella": {"id": "ella", "name": "Ella", "region": "Uva", "description": "Mountains, tea estates and hiking",
              "highlights": ["Nine Arches Bridge", "Little Adam's Peak", "Ella Rock"], "latitude": 6.87, "longitude": 81.05},
@@ -62,6 +62,8 @@ def encode_sse(event: dict) -> str:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     config_path = os.path.join(os.path.dirname(__file__), "agent_config.json")
+    # Where the memory MCP server keeps the trip notes (${TRIP_NOTES_FILE} in agent_config.json)
+    os.environ.setdefault("TRIP_NOTES_FILE", os.path.join(os.path.dirname(os.path.abspath(__file__)), "trip_notes.jsonl"))
     app.state.agent = await ChatAgent.create("openwebui-test-agent", config_path,
                                              tools=[search_destinations])
     yield
