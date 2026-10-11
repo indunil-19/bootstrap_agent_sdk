@@ -16,3 +16,6 @@ examples/openwebui/trip_notes.jsonl
 *.egg-info/
 build/
 dist/
+
+# Example web apps
+node_modules/

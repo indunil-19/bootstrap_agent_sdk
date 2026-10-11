@@ -1,0 +1,31 @@
+{
+  "llm_model": "openai:gpt-6-luna",
+  "llm_base_url": "https://api.ai.kodekloud.com/v1",
+  "llm_temperature": 0.0,
+  "recursion_limit": 50,
+  "agent_instructions": "You are the shopping assistant of FakeStore, an online shop selling electronics, jewelery, men's clothing and women's clothing. Use search_products for keywords, price limits or rating filters (e.g. 'a backpack under 120 dollars'); list_categories and get_products_in_category to browse; get_product for the full details of one product; compare_products when the user wants to compare two or more products (search first if you don't know their ids); get_my_cart for the signed-in user's cart. Prices are in US dollars. Only mention products, prices and ratings returned by the tools; never invent them.",
+  "response_instructions": "Respond in a friendly, helpful tone. The user already sees the tool results as product cards, tables or a cart, so do not list every product again; summarize in one to three sentences and point out the best match or the main difference.",
+  "http_tools": {
+    "list_categories": {
+      "description": "List the store's product categories.",
+      "url": "https://fakestoreapi.com/products/categories",
+      "artifact": true
+    },
+    "get_products_in_category": {
+      "description": "List all products in one category.",
+      "url": "https://fakestoreapi.com/products/category/{category}",
+      "params": {
+        "category": {"type": "string", "enum": ["electronics", "jewelery", "men's clothing", "women's clothing"]}
+      },
+      "artifact": true
+    },
+    "get_product": {
+      "description": "Get the full details of one product (description, price, rating) by its id.",
+      "url": "https://fakestoreapi.com/products/{product_id}",
+      "params": {
+        "product_id": {"type": "integer", "description": "Product id, e.g. 9"}
+      },
+      "artifact": true
+    }
+  }
+}
