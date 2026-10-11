@@ -128,23 +128,36 @@ async def check_mcp_ui_support(servers: dict) -> list[dict]:
     Entries: {"server", "tool", "selected" (listed in the server's "tools", or no list), "json_output",
     "output_schema", "structure" (output_structure() lines), "ui_resource" (MCP Apps _meta.ui.resourceUri,
     if any)}.
+    A server that cannot be reached gives one entry {"server", "error"} instead, so the others are still checked.
     """
     client = MultiServerMCPClient(_connections(servers))
     results = []
     for server_name, config in servers.items():
         wanted = config.get("tools")
-        async with client.session(server_name) as session:
-            for tool in (await session.list_tools()).tools:
-                results.append({
-                    "server": server_name,
-                    "tool": tool.name,
-                    "selected": wanted is None or tool.name in wanted,
-                    "json_output": tool.outputSchema is not None,
-                    "output_schema": tool.outputSchema,
-                    "structure": output_structure(tool.outputSchema),
-                    "ui_resource": ((tool.meta or {}).get("ui") or {}).get("resourceUri"),
-                })
+        try:
+            async with client.session(server_name) as session:
+                tools = (await session.list_tools()).tools
+        except Exception as e:
+            results.append({"server": server_name, "error": _root_error(e)})
+            continue
+        for tool in tools:
+            results.append({
+                "server": server_name,
+                "tool": tool.name,
+                "selected": wanted is None or tool.name in wanted,
+                "json_output": tool.outputSchema is not None,
+                "output_schema": tool.outputSchema,
+                "structure": output_structure(tool.outputSchema),
+                "ui_resource": ((tool.meta or {}).get("ui") or {}).get("resourceUri"),
+            })
     return results
+
+
+def _root_error(error: BaseException) -> str:
+    """The real cause inside the MCP client's ExceptionGroup, e.g. 'ConnectError: [Errno 11001] getaddrinfo failed'."""
+    while isinstance(error, BaseExceptionGroup) and error.exceptions:
+        error = error.exceptions[0]
+    return f"{type(error).__name__}: {error}"
 
 
 async def preview_mcp_tool(servers: dict, server_name: str, tool_name: str, args: dict | None = None) -> dict:
@@ -162,6 +175,9 @@ def _print_report(results: list[dict]):
     for server_name in dict.fromkeys(entry["server"] for entry in results):
         entries = [entry for entry in results if entry["server"] == server_name]
         print(f"\nMCP server '{server_name}'")
+        if "error" in entries[0]:
+            print(f"  could not connect: {entries[0]['error']}")
+            continue
         width = max(len(entry["tool"]) for entry in entries)
         for entry in entries:
             selected = " " if entry["selected"] else "-"
@@ -203,7 +219,10 @@ async def _main():
     if options.call:
         if not options.server:
             parser.error("--call needs --server")
-        declared = next((entry for entry in await check_mcp_ui_support(servers) if entry["tool"] == options.call), None)
+        entries = await check_mcp_ui_support(servers)
+        if entries and "error" in entries[0]:
+            parser.exit(1, f"could not connect to MCP server '{options.server}': {entries[0]['error']}\n")
+        declared = next((entry for entry in entries if entry["tool"] == options.call), None)
         if declared and declared["structure"]:
             print(f"\nDeclared JSON structure (outputSchema):\n" + "\n".join(output_structure(declared["output_schema"], "  ")))
         elif declared:
