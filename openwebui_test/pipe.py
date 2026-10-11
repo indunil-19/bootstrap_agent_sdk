@@ -31,11 +31,12 @@ STYLE = """<style>
   .muted { color: #6b7280; font-size: 12px; }
   .card ul { margin: 8px 0 0; padding-left: 18px; font-size: 13px; }
   .big { font-size: 28px; font-weight: 600; }
+  .card img { width: 100%; height: 110px; object-fit: cover; border-radius: 6px; margin-bottom: 8px; }
 </style>"""
 
 
 def page(body: str) -> str:
-    return f"<!DOCTYPE html><html><head>{STYLE}</head><body>{body}{HEIGHT_SCRIPT}</body></html>"
+    return f"<!DOCTYPE html><html><head><meta charset='utf-8'>{STYLE}</head><body>{body}{HEIGHT_SCRIPT}</body></html>"
 
 
 def render_destinations(data: dict) -> str:
@@ -49,19 +50,51 @@ def render_destinations(data: dict) -> str:
     return page(f"<div class='grid'>{cards}</div>")
 
 
-def render_weather(data: dict) -> str:
+# WMO weather codes used by Open-Meteo (https://open-meteo.com/en/docs)
+WEATHER_CODES = {0: "Clear sky", 1: "Mainly clear", 2: "Partly cloudy", 3: "Overcast", 45: "Fog", 48: "Fog",
+                 51: "Light drizzle", 53: "Drizzle", 55: "Heavy drizzle", 61: "Light rain", 63: "Rain",
+                 65: "Heavy rain", 80: "Rain showers", 81: "Rain showers", 82: "Violent rain showers",
+                 95: "Thunderstorm", 96: "Thunderstorm with hail", 99: "Thunderstorm with hail"}
+
+
+def render_live_weather(data: dict) -> str:
+    # Artifact = the full Open-Meteo response ("artifact": true, no response_path)
+    current, units = data.get("current", {}), data.get("current_units", {})
+
+    def reading(key):
+        return html.escape(f"{current.get(key, '?')} {units.get(key, '')}".strip())
+
+    location = f"{data.get('latitude', 0):.2f}, {data.get('longitude', 0):.2f} · {data.get('timezone', '')}"
     return page(
-        f"<div class='grid'><article class='card'><div class='muted'>Weather</div>"
-        f"<h3>{html.escape(str(data['destination']))}</h3>"
-        f"<div class='big'>{html.escape(str(data['temperature_c']))} °C</div>"
-        f"<div>{html.escape(str(data['condition']))}</div></article></div>"
+        f"<div class='grid'><article class='card'><div class='muted'>Live weather · {html.escape(location)}</div>"
+        f"<div class='big'>{reading('temperature_2m')}</div>"
+        f"<div>{html.escape(WEATHER_CODES.get(current.get('weather_code'), 'Unknown conditions'))}</div>"
+        f"<div class='muted'>Humidity {reading('relative_humidity_2m')} · Wind {reading('wind_speed_10m')}"
+        f" · {html.escape(str(current.get('time', '')))}</div></article></div>"
     )
 
 
+def render_recipes(recipes: list) -> str:
+    # Artifact = the "recipes" list from DummyJSON ("artifact": "recipes")
+    cards = []
+    for r in recipes:
+        image = str(r.get("image", ""))
+        img = f"<img src='{html.escape(image)}' alt=''>" if image.startswith("https://") else ""
+        minutes = (r.get("prepTimeMinutes") or 0) + (r.get("cookTimeMinutes") or 0)
+        cards.append(
+            f"<article class='card'>{img}<h3>{html.escape(str(r.get('name', '')))}</h3>"
+            f"<div class='muted'>{html.escape(str(r.get('cuisine', '')))} · {html.escape(str(r.get('difficulty', '')))}</div>"
+            f"<div>★ {html.escape(str(r.get('rating', '-')))} · {minutes} min</div></article>"
+        )
+    return page(f"<div class='grid'>{''.join(cards)}</div>")
+
+
 # Tool name -> HTML renderer. Tools without a renderer still work; they just show no card.
+# search_destinations is a local @tool in server.py; the others are HTTP tools from agent_config.json.
 RENDERERS = {
     "search_destinations": render_destinations,
-    "get_weather": render_weather,
+    "get_live_weather": render_live_weather,
+    "search_recipes": render_recipes,
 }
 
 
@@ -117,7 +150,7 @@ class Pipe:
 
                         elif kind == "tool.finished":
                             renderer = RENDERERS.get(data["name"])
-                            if renderer and data["status"] == "success" and data["data"] is not None:
+                            if renderer and data["status"] == "success" and data["data"]:  # skip None and empty results
                                 embeds[data["call_id"]] = renderer(data["data"])
                                 await emit_event({"type": "embeds", "data": {"embeds": list(embeds.values())}})
                             await emit_event({"type": "status", "data": {

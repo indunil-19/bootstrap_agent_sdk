@@ -121,6 +121,25 @@ def _response_text(response: httpx.Response, response_path: str | None, max_char
     return text
 
 
+def _response_artifact(name: str, response: httpx.Response, artifact: bool | str, response_path: str | None):
+    """Return the part of a JSON response sent to the frontend (not truncated), or None.
+
+    artifact=True uses the same data as the model (after response_path); a string is a dotted
+    path into the full response. Non-JSON responses and missing paths give no artifact.
+    """
+    if "json" not in response.headers.get("content-type", ""):
+        return None
+    path = response_path if artifact is True else artifact
+    try:
+        data = response.json()
+        return _extract(data, path) if path else data
+    except ValueError:
+        return None
+    except KeyError:
+        logger.warning("[http] %s: artifact path '%s' was not found in the response", name, path)
+        return None
+
+
 def _build_http_tool(name: str, spec: dict) -> BaseTool:
     if not _TOOL_NAME.match(name):
         raise ValueError(f"HTTP tool name '{name}' must match {_TOOL_NAME.pattern}")
@@ -190,7 +209,17 @@ def _build_http_tool(name: str, spec: dict) -> BaseTool:
     timeout = spec.get("timeout", DEFAULT_TIMEOUT)
     max_chars = spec.get("max_response_chars", DEFAULT_MAX_RESPONSE_CHARS)
 
-    async def call_endpoint(config: RunnableConfig, **kwargs) -> str:
+    # Optional structured data for rich UIs: true, or a dotted path into the JSON response
+    artifact = spec.get("artifact", False)
+    if not (artifact is True or artifact is False or (isinstance(artifact, str) and artifact)):
+        raise ValueError(f"HTTP tool '{name}': 'artifact' must be true, false or a dotted path into the response")
+
+    async def call_endpoint(config: RunnableConfig, **kwargs):
+        text, data = await request_endpoint(config, **kwargs)
+        # With an artifact the tool returns (content for the model, data for the frontend)
+        return (text, data) if artifact else text
+
+    async def request_endpoint(config: RunnableConfig, **kwargs) -> tuple[str, object]:
         payload = (config.get("configurable") or {}).get("payload") or {}
         args = {key: value for key, value in kwargs.items() if value is not None}
         by_location = {location: {key: value for key, value in args.items() if locations[key] == location}
@@ -207,7 +236,7 @@ def _build_http_tool(name: str, spec: dict) -> BaseTool:
                 http_auth = httpx.BasicAuth(str(filled_auth["username"]), str(filled_auth["password"]))
         except _MissingPayloadValue as e:
             logger.warning("[http] %s: missing %s", name, e)
-            return f"Error: this tool needs '{e}' to be provided by the application, but it is missing."
+            return f"Error: this tool needs '{e}' to be provided by the application, but it is missing.", None
 
         start = time.perf_counter()
         try:
@@ -222,24 +251,26 @@ def _build_http_tool(name: str, spec: dict) -> BaseTool:
                 )
         except httpx.TimeoutException:
             logger.warning("[http] %s: timed out after %ss", name, timeout)
-            return f"Error: the request timed out after {timeout} seconds."
+            return f"Error: the request timed out after {timeout} seconds.", None
         except httpx.HTTPError as e:
             logger.warning("[http] %s: request failed: %s", name, type(e).__name__)
-            return f"Error: the request failed ({type(e).__name__})."
+            return f"Error: the request failed ({type(e).__name__}).", None
 
         # Log without the query string, which may contain API keys
         logger.info("[http] %s: %s %s -> %d in %.2fs", name, method,
                     response.request.url.copy_with(query=None), response.status_code, time.perf_counter() - start)
 
         if response.status_code >= 400:
-            return f"Error: HTTP {response.status_code}: {_response_text(response, None, 500)}"
-        return _response_text(response, response_path, max_chars)
+            return f"Error: HTTP {response.status_code}: {_response_text(response, None, 500)}", None
+        text = _response_text(response, response_path, max_chars)
+        return text, _response_artifact(name, response, artifact, response_path) if artifact else None
 
     return StructuredTool.from_function(
         coroutine=call_endpoint,
         name=name,
         description=description,
         args_schema=args_schema,
+        response_format="content_and_artifact" if artifact else "content",
     )
 
 

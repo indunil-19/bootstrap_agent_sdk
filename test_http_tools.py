@@ -1,8 +1,8 @@
 """Test HTTP tools declared under "http_tools" in the agent config.
 
 Part 1 calls the tools directly (no LLM) against free public APIs to check request building:
-payload tokens, ${ENV} values, URL-encoding of path params, response_path, errors and validation.
-Part 2 runs a ChatAgent end-to-end with the same tools.
+payload tokens, ${ENV} values, URL-encoding of path params, response_path, artifacts, errors and validation.
+Part 2 runs a ChatAgent end-to-end with the same tools and checks that artifacts reach chat()'s tool_outputs.
 """
 
 import asyncio
@@ -35,6 +35,26 @@ HTTP_TOOLS = {
         },
         "query": {"current": "temperature_2m,wind_speed_10m"},
         "response_path": "current",
+        # The frontend gets the same data as the model ("current"), untruncated
+        "artifact": True,
+    },
+    "get_weather_units": {
+        "description": "Get the units of the current weather readings.",
+        "url": "https://api.open-meteo.com/v1/forecast",
+        "params": {
+            "latitude": {"type": "number", "description": "Latitude of the location"},
+            "longitude": {"type": "number", "description": "Longitude of the location"},
+        },
+        "query": {"current": "temperature_2m"},
+        "response_path": "current",
+        "artifact": "current_units",
+    },
+    "list_user_posts": {
+        "description": "List the blog posts of a user.",
+        "url": "https://jsonplaceholder.typicode.com/posts",
+        "params": {"userId": {"type": "integer", "description": "User id"}},
+        "max_response_chars": 200,
+        "artifact": True,
     },
     "get_exchange_rate": {
         "description": "Get the latest exchange rate between two currencies.",
@@ -77,6 +97,7 @@ HTTP_TOOLS = {
     "not_found": {
         "description": "Endpoint that returns 404.",
         "url": "https://httpbin.org/status/404",
+        "artifact": True,
     },
 }
 
@@ -143,6 +164,35 @@ async def direct_tests():
     except ValidationError:
         check("enum validation", True)
 
+    # Artifacts are only attached when the tool is called through a tool call (as the agent does)
+    async def tool_call(tool_name, args):
+        return await tools[tool_name].ainvoke({"type": "tool_call", "id": "call-1", "name": tool_name, "args": args},
+                                              config=run_config)
+
+    message = await tool_call("get_current_weather", {"latitude": 48.85, "longitude": 2.35})
+    check("artifact: true = same data as the model", isinstance(message.artifact, dict)
+          and message.artifact == json.loads(message.content), str(message.artifact)[:100])
+
+    message = await tool_call("get_weather_units", {"latitude": 48.85, "longitude": 2.35})
+    check("artifact path into the full response", message.artifact.get("temperature_2m") == "°C"
+          and "°C" not in message.content, f"{message.artifact} / {message.content[:60]}")
+
+    message = await tool_call("list_user_posts", {"userId": 1})
+    check("artifact is not truncated", "[truncated" in message.content
+          and isinstance(message.artifact, list) and len(message.artifact) == 10, f"{len(message.artifact or [])} posts")
+
+    message = await tool_call("not_found", {})
+    check("HTTP error gives no artifact", message.content.startswith("Error: HTTP 404") and message.artifact is None)
+
+    message = await tool_call("get_post", {"post_id": 1})
+    check("no artifact unless configured", message.artifact is None and json.loads(message.content)["id"] == 1)
+
+    try:
+        build_http_tools({"bad": {"description": "d", "url": "https://x.com", "artifact": ""}})
+        check("config error: empty artifact path", False, "no error raised")
+    except ValueError as e:
+        check("config error: empty artifact path", True, str(e))
+
     try:
         build_http_tools({"bad": {"description": "d", "url": "https://x.com/{missing}"}})
         check("config error: url placeholder without param", False, "no error raised")
@@ -164,8 +214,14 @@ async def agent_test():
 
     agent = await ChatAgent.create(name="http-test-agent", config_path=config_file.name, tools=[])
 
-    for prompt in ["What's the weather in Paris right now?",
-                   "How many euros is 1 US dollar today?",
+    result = await agent.chat("What's the weather in Paris right now?", chat_id="http-test", payload=PAYLOAD)
+    print(f"\nUser: What's the weather in Paris right now?\nAssistant: {result['text']}")
+    outputs = result["tool_outputs"]
+    check("agent: artifact in chat() tool_outputs",
+          [output["name"] for output in outputs] == ["get_current_weather"] and "temperature_2m" in outputs[0]["data"],
+          str(outputs)[:120])
+
+    for prompt in ["How many euros is 1 US dollar today?",
                    "What is the title of post 3?",
                    "Create a post titled 'Hello' with the text 'First post'. What id and userId did it get?"]:
         print(f"\nUser: {prompt}")

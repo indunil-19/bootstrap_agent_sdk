@@ -22,18 +22,18 @@ from net.kairachat.agent.llm_agent import ChatAgent
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
 
-# Demo data; a real application would call its own services here
+# Demo data; a real application would call its own services here. Live weather and recipes come
+# from the HTTP tools in agent_config.json (Open-Meteo and DummyJSON).
 DESTINATIONS = {
     "ella": {"id": "ella", "name": "Ella", "region": "Uva", "description": "Mountains, tea estates and hiking",
-             "highlights": ["Nine Arches Bridge", "Little Adam's Peak", "Ella Rock"]},
+             "highlights": ["Nine Arches Bridge", "Little Adam's Peak", "Ella Rock"], "latitude": 6.87, "longitude": 81.05},
     "galle": {"id": "galle", "name": "Galle", "region": "Southern", "description": "Dutch fort and beaches",
-              "highlights": ["Galle Fort", "Unawatuna Beach", "Lighthouse"]},
+              "highlights": ["Galle Fort", "Unawatuna Beach", "Lighthouse"], "latitude": 6.03, "longitude": 80.22},
     "kandy": {"id": "kandy", "name": "Kandy", "region": "Central", "description": "Temples and the hill capital",
-              "highlights": ["Temple of the Tooth", "Kandy Lake", "Peradeniya Gardens"]},
+              "highlights": ["Temple of the Tooth", "Kandy Lake", "Peradeniya Gardens"], "latitude": 7.29, "longitude": 80.63},
     "sigiriya": {"id": "sigiriya", "name": "Sigiriya", "region": "Central", "description": "Ancient rock fortress",
-                 "highlights": ["Lion Rock", "Frescoes", "Pidurangala Rock"]},
+                 "highlights": ["Lion Rock", "Frescoes", "Pidurangala Rock"], "latitude": 7.96, "longitude": 80.76},
 }
-WEATHER = {"ella": (19, "Misty"), "galle": (29, "Sunny"), "kandy": (24, "Partly cloudy"), "sigiriya": (31, "Sunny")}
 
 
 @tool(response_format="content_and_artifact")
@@ -43,19 +43,9 @@ async def search_destinations(interest: str = "any"):
     items = [d for d in DESTINATIONS.values()
              if interest == "any" or any(w in (d["description"] + " " + " ".join(d["highlights"])).lower() for w in words)]
     items = items or list(DESTINATIONS.values())
-    content = "; ".join(f"{d['name']} ({d['description']})" for d in items)
+    # Coordinates go to the model so it can call get_live_weather for a destination
+    content = "; ".join(f"{d['name']} ({d['description']}, lat {d['latitude']}, lon {d['longitude']})" for d in items)
     return f"Found {len(items)} destinations: {content}.", {"destinations": items}
-
-
-@tool(response_format="content_and_artifact")
-async def get_weather(destination: str):
-    """Get the current weather for a Sri Lankan destination, e.g. Ella or Galle."""
-    key = destination.strip().lower()
-    if key not in WEATHER:
-        return f"No weather data for {destination}.", None
-    temperature, condition = WEATHER[key]
-    return (f"Weather in {DESTINATIONS[key]['name']}: {condition}, {temperature} °C.",
-            {"destination": DESTINATIONS[key]["name"], "temperature_c": temperature, "condition": condition})
 
 
 class ChatRequest(BaseModel):
@@ -73,7 +63,7 @@ def encode_sse(event: dict) -> str:
 async def lifespan(app: FastAPI):
     config_path = os.path.join(os.path.dirname(__file__), "agent_config.json")
     app.state.agent = await ChatAgent.create("openwebui-test-agent", config_path,
-                                             tools=[search_destinations, get_weather])
+                                             tools=[search_destinations])
     yield
 
 
