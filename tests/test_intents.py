@@ -97,7 +97,7 @@ def check(name: str, passed: bool, detail: str = ""):
 
 
 def write_config(intent_classification: dict | None) -> str:
-    with open(os.path.join(BASE_DIR, "agent_config.json")) as f:
+    with open(os.path.join(BASE_DIR, "../agent_config.json")) as f:
         config = json.load(f)
     config.pop("mcp_servers", None)
     config.pop("intent_classification", None)

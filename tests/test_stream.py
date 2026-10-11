@@ -27,7 +27,7 @@ async def search_destinations(country: str):
 
 
 async def main():
-    config_path = os.path.join(os.path.dirname(__file__), "agent_config.json")
+    config_path = os.path.join(os.path.dirname(__file__), "../agent_config.json")
     agent = await ChatAgent.create(name="stream-test-agent", config_path=config_path, tools=[search_destinations])
     question = "Suggest some destinations in Sri Lanka."
 

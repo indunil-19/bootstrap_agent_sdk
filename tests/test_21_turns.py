@@ -30,7 +30,7 @@ def get_weather(city: str) -> str:
 
 
 async def main():
-    config_path = os.path.join(os.path.dirname(__file__), "agent_config.json")
+    config_path = os.path.join(os.path.dirname(__file__), "../agent_config.json")
 
     agent = await ChatAgent.create(
         name="21-turn-test-agent",

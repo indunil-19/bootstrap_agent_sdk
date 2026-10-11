@@ -20,7 +20,7 @@ load_dotenv()
 logging.basicConfig(level=logging.WARNING)
 logging.getLogger("bootstrap_agent").setLevel(logging.INFO)
 
-CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "agent_config.json")
+CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../agent_config.json")
 
 # One question per configured server, each needing one of that server's tools
 PROMPTS = {

@@ -33,7 +33,7 @@ def get_user_name(config: RunnableConfig) -> str:
 
 
 async def main():
-    config_path = os.path.join(os.path.dirname(__file__), "agent_config.json")
+    config_path = os.path.join(os.path.dirname(__file__), "../agent_config.json")
 
     agent = await ChatAgent.create(
         name="graph-test-agent",

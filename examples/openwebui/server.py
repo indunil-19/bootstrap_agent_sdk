@@ -1,8 +1,8 @@
 """Test backend for Open WebUI: a small travel ChatAgent behind /chat and /chat/stream (SSE).
 
 Run from the repo root:
-    python -m openwebui_test.server
-Then connect Open WebUI with the Pipe in openwebui_test/pipe.py (see openwebui_test/README.md).
+    python -m openwebui.server
+Then connect Open WebUI with the Pipe in openwebui/pipe.py (see openwebui/README.md).
 """
 
 import json
@@ -63,7 +63,8 @@ def encode_sse(event: dict) -> str:
 async def lifespan(app: FastAPI):
     config_path = os.path.join(os.path.dirname(__file__), "agent_config.json")
     # Where the memory MCP server keeps the trip notes (${TRIP_NOTES_FILE} in agent_config.json)
-    os.environ.setdefault("TRIP_NOTES_FILE", os.path.join(os.path.dirname(os.path.abspath(__file__)), "trip_notes.jsonl"))
+    os.environ.setdefault("TRIP_NOTES_FILE", os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                                          "trip_notes.jsonl"))
     app.state.agent = await ChatAgent.create("openwebui-test-agent", config_path,
                                              tools=[search_destinations])
     yield

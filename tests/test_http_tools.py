@@ -202,7 +202,7 @@ async def direct_tests():
 
 async def agent_test():
     print("\n=== Part 2: agent end-to-end ===")
-    with open(os.path.join(BASE_DIR, "agent_config.json")) as f:
+    with open(os.path.join(BASE_DIR, "../agent_config.json")) as f:
         config = json.load(f)
     config.pop("mcp_servers", None)
     config["http_tools"] = {name: HTTP_TOOLS[name] for name in

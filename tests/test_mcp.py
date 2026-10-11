@@ -31,7 +31,7 @@ def add(a: int, b: int) -> int:
 
 def write_config(mcp_servers: dict) -> str:
     """Write a temp config: agent_config.json plus the given mcp_servers."""
-    with open(os.path.join(BASE_DIR, "agent_config.json")) as f:
+    with open(os.path.join(BASE_DIR, "../agent_config.json")) as f:
         config = json.load(f)
     config["mcp_servers"] = mcp_servers
 
