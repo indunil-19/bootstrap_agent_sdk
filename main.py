@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 from langchain_core.messages import HumanMessage
 from langchain_core.tools import tool
 
-from net.kairachat.agent.llm_agent import ChatAgent
+from bootstrap_agent.llm_agent import ChatAgent
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO)

@@ -15,11 +15,11 @@ import tempfile
 from dotenv import load_dotenv
 from langchain_core.tools import tool
 
-from net.kairachat.agent.llm_agent import ChatAgent
+from bootstrap_agent.llm_agent import ChatAgent
 
 load_dotenv()
 logging.basicConfig(level=logging.WARNING)
-logging.getLogger("net.kairachat.agent").setLevel(logging.INFO)
+logging.getLogger("bootstrap_agent").setLevel(logging.INFO)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -144,7 +144,7 @@ async def conversation_test():
     agent = await ChatAgent.create(name="intent-test-agent", config_path=config_path, tools=[add, get_weather, find_store])
 
     recorder = LogRecorder()
-    logging.getLogger("net.kairachat.agent.llm_agent").addHandler(recorder)
+    logging.getLogger("bootstrap_agent.llm_agent").addHandler(recorder)
 
     # (message, expected intent, expected route, allowed tools or None for any, extra check on the reply)
     cases = [

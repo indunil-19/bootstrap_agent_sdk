@@ -14,11 +14,11 @@ import re
 
 from dotenv import load_dotenv
 
-from net.kairachat.agent.llm_agent import ChatAgent
+from bootstrap_agent.llm_agent import ChatAgent
 
 load_dotenv()
 logging.basicConfig(level=logging.WARNING)
-logging.getLogger("net.kairachat.agent").setLevel(logging.INFO)
+logging.getLogger("bootstrap_agent").setLevel(logging.INFO)
 
 CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "agent_config.json")
 
@@ -58,7 +58,7 @@ async def main():
     print(f"\nLoaded {len(loaded)} tools from {len(mcp_servers)} servers: {sorted(loaded)}")
 
     recorder = ToolCallRecorder()
-    logging.getLogger("net.kairachat.agent.llm_agent").addHandler(recorder)
+    logging.getLogger("bootstrap_agent.llm_agent").addHandler(recorder)
 
     # 2. Each server's question should call at least one of that server's tools
     results = {}

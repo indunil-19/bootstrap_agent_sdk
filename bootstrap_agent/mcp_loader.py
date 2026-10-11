@@ -4,7 +4,7 @@ import logging
 from langchain_core.tools import BaseTool
 from langchain_mcp_adapters.client import MultiServerMCPClient
 
-from net.kairachat.agent.utils import expand_env
+from bootstrap_agent.utils import expand_env
 
 logger = logging.getLogger(__name__)
 

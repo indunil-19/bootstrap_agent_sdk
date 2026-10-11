@@ -7,14 +7,14 @@ JSON to frontends as the tool's artifact (chat()["tool_outputs"], stream_chat() 
 Run from the repo root:
 
     # List every tool of every MCP server in the config, with its JSON fields
-    python -m net.kairachat.agent.mcp_ui_check agent_config.json
+    python -m bootstrap_agent.mcp_ui_check agent_config.json
 
     # Only one server
-    python -m net.kairachat.agent.mcp_ui_check agent_config.json --server memory
+    python -m bootstrap_agent.mcp_ui_check agent_config.json --server memory
 
     # Call a tool and show exactly what the UI would receive
-    python -m net.kairachat.agent.mcp_ui_check agent_config.json --server memory --call read_graph
-    python -m net.kairachat.agent.mcp_ui_check agent_config.json --server time --call get_current_time --args "{\"timezone\": \"Asia/Colombo\"}"
+    python -m bootstrap_agent.mcp_ui_check agent_config.json --server memory --call read_graph
+    python -m bootstrap_agent.mcp_ui_check agent_config.json --server time --call get_current_time --args "{\"timezone\": \"Asia/Colombo\"}"
 """
 
 import argparse
@@ -24,8 +24,8 @@ import logging
 
 from langchain_mcp_adapters.client import MultiServerMCPClient
 
-from net.kairachat.agent.mcp_loader import load_mcp_tools_from_config
-from net.kairachat.agent.utils import expand_env
+from bootstrap_agent.mcp_loader import load_mcp_tools_from_config
+from bootstrap_agent.utils import expand_env
 
 
 def _connections(servers: dict) -> dict:

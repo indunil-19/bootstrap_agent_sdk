@@ -11,3 +11,8 @@ venv/
 
 # Open WebUI test: trip notes saved by the memory MCP server
 openwebui_test/trip_notes.jsonl
+
+# Packaging (pip install -e .)
+*.egg-info/
+build/
+dist/

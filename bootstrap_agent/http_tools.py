@@ -17,7 +17,7 @@ from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool, StructuredTool
 from pydantic import Field, create_model
 
-from net.kairachat.agent.utils import expand_env
+from bootstrap_agent.utils import expand_env
 
 logger = logging.getLogger(__name__)
 

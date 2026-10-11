@@ -1,4 +1,4 @@
-from net.kairachat.agent.config.Config import Config
+from bootstrap_agent.config.Config import Config
 
 
 class AgentConfig(Config):

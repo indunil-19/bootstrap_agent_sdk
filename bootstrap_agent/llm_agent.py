@@ -10,14 +10,14 @@ from langgraph.constants import START, END
 from langgraph.graph import StateGraph
 from langgraph.prebuilt import create_react_agent
 
-from net.kairachat.agent.agent import Agent
-from net.kairachat.agent.config.Agent_config import AgentConfig
-from net.kairachat.agent.http_tools import build_http_tools
-from net.kairachat.agent.intents import (DEFAULT_HISTORY_MESSAGES, NO_INTENT, build_classifier_prompt,
+from bootstrap_agent.agent import Agent
+from bootstrap_agent.config.Agent_config import AgentConfig
+from bootstrap_agent.http_tools import build_http_tools
+from bootstrap_agent.intents import (DEFAULT_HISTORY_MESSAGES, NO_INTENT, build_classifier_prompt,
                                          build_intent_model, build_refusal_prompt, load_intent_settings)
-from net.kairachat.agent.mcp_loader import load_mcp_tools_from_config
-from net.kairachat.agent.models.State import State
-from net.kairachat.agent.usage import TokenUsage
+from bootstrap_agent.mcp_loader import load_mcp_tools_from_config
+from bootstrap_agent.models.State import State
+from bootstrap_agent.usage import TokenUsage
 
 logger = logging.getLogger(__name__)
 

@@ -14,12 +14,12 @@ import tempfile
 from dotenv import load_dotenv
 from pydantic import ValidationError
 
-from net.kairachat.agent.http_tools import build_http_tools
-from net.kairachat.agent.llm_agent import ChatAgent
+from bootstrap_agent.http_tools import build_http_tools
+from bootstrap_agent.llm_agent import ChatAgent
 
 load_dotenv()
 logging.basicConfig(level=logging.WARNING)
-logging.getLogger("net.kairachat.agent").setLevel(logging.INFO)
+logging.getLogger("bootstrap_agent").setLevel(logging.INFO)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 

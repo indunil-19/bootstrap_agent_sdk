@@ -17,7 +17,7 @@ from fastapi.responses import StreamingResponse
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field
 
-from net.kairachat.agent.llm_agent import ChatAgent
+from bootstrap_agent.llm_agent import ChatAgent
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
