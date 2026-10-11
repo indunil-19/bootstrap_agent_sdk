@@ -1,5 +1,7 @@
+import asyncio
 import logging
 import time
+from uuid import uuid4
 
 from langchain.chat_models import init_chat_model
 from langchain_core.messages import HumanMessage, AIMessage, RemoveMessage, SystemMessage, ToolMessage, convert_to_messages
@@ -21,6 +23,11 @@ logger = logging.getLogger(__name__)
 # Once history exceeds SUMMARY_TRIGGER messages, the oldest SUMMARY_TRIGGER messages are
 # summarized and removed; the rest are kept until history exceeds SUMMARY_TRIGGER again.
 SUMMARY_TRIGGER = 20
+
+# Tag on the LLM calls that write the final reply; only their tokens are streamed as message.delta
+PUBLIC_RESPONSE_TAG = "public_response"
+# Version of the stream_chat event envelope, independent of the library version
+STREAM_SCHEMA_VERSION = "1"
 
 class ChatAgent(Agent):
     def __init__(self, name, config_path, tools, log_level=logging.INFO):
@@ -100,18 +107,22 @@ class ChatAgent(Agent):
         # Pass the run config through so tools receive the payload and the recursion limit applies
         agent_response = await agent.ainvoke(state, config=config)
 
-        # Log the intermediate ReAct steps (tool calls and tool results) produced for this query
+        # Log the intermediate ReAct steps (tool calls and tool results) produced for this query, and keep
+        # the tool artifacts (tools with response_format="content_and_artifact") so frontends can render them
+        tool_outputs = []
         for message in agent_response["messages"][len(state["messages"]):]:
             if isinstance(message, AIMessage) and message.tool_calls:
                 for tool_call in message.tool_calls:
                     logger.info("[%s] agent: tool call -> %s(%s)", self.name, tool_call["name"], tool_call["args"])
             elif isinstance(message, ToolMessage):
                 logger.info("[%s] agent: tool result <- %s: %s", self.name, message.name, message.content)
+                if message.artifact is not None:
+                    tool_outputs.append({"call_id": message.tool_call_id, "name": message.name, "data": message.artifact})
 
         final_message = agent_response["messages"][-1]
         logger.info("[%s] agent: done in %.2fs", self.name, time.perf_counter() - start)
 
-        return {"messages": [final_message]}
+        return {"messages": [final_message], "tool_outputs": tool_outputs}
 
 
     async def summarizer_node(self, state:State):
@@ -155,7 +166,7 @@ class ChatAgent(Agent):
             for message in latest_messages
         ],}
 
-    async def response_node(self, state: State):
+    async def response_node(self, state: State, config: RunnableConfig):
         summary = state.get("summary", "")
         messages = state.get("messages", [])
         logger.info("[%s] response_generator: generating final response", self.name)
@@ -187,7 +198,7 @@ class ChatAgent(Agent):
 
         llm_input = [SystemMessage(content=self._add_response_instructions(system_prompt))] + messages
 
-        response = await self.llm.ainvoke(llm_input)
+        response = await self.llm.ainvoke(llm_input, config=self._public_config(config))
         logger.info("[%s] response_generator: done in %.2fs", self.name, time.perf_counter() - start)
         return {"messages": [AIMessage(content=response.content)]}
 
@@ -216,7 +227,7 @@ class ChatAgent(Agent):
                     tools, time.perf_counter() - start, reason)
         return {"intent": intent}
 
-    async def direct_response_node(self, state: State):
+    async def direct_response_node(self, state: State, config: RunnableConfig):
         intent = self.intents[state["intent"]]
         logger.info("[%s] direct_response: replying without tools", self.name)
 
@@ -237,11 +248,11 @@ class ChatAgent(Agent):
             system_prompt += f"\n\n{intent['instructions']}"
 
         llm_input = [SystemMessage(content=self._add_response_instructions(system_prompt))] + state["messages"]
-        response = await self.llm.ainvoke(llm_input)
+        response = await self.llm.ainvoke(llm_input, config=self._public_config(config))
         logger.info("[%s] direct_response: done in %.2fs", self.name, time.perf_counter() - start)
         return {"messages": [AIMessage(content=response.content)]}
 
-    async def refuse_node(self, state: State):
+    async def refuse_node(self, state: State, config: RunnableConfig):
         intent = self.intents[state["intent"]]
         logger.info("[%s] refuse: declining the request", self.name)
 
@@ -251,9 +262,16 @@ class ChatAgent(Agent):
         start = time.perf_counter()
         system_prompt = self._add_response_instructions(build_refusal_prompt(self.intents))
         # Only the latest message is sent, so the model has nothing else to answer
-        response = await self.llm.ainvoke([SystemMessage(content=system_prompt), state["messages"][-1]])
+        response = await self.llm.ainvoke([SystemMessage(content=system_prompt), state["messages"][-1]],
+                                          config=self._public_config(config))
         logger.info("[%s] refuse: done in %.2fs", self.name, time.perf_counter() - start)
         return {"messages": [AIMessage(content=response.content)]}
+
+    @staticmethod
+    def _public_config(config: RunnableConfig) -> RunnableConfig:
+        # Tags the LLM call that writes the reply the user sees, so stream_chat streams only its tokens
+        # (not the classifier, summarizer or ReAct draft)
+        return {**config, "tags": [*config.get("tags", []), PUBLIC_RESPONSE_TAG]}
 
     def _add_response_instructions(self, system_prompt: str) -> str:
         # Optional deployment-specific instructions from the agent config.
@@ -317,8 +335,26 @@ class ChatAgent(Agent):
         route = self.intents.get(state["intent"], {}).get("route", "agent")
         return {"agent": "agent", "direct": "direct_response", "refuse": "refuse"}[route]
 
-    async def start_chat(self, message: str, chat_id: str, payload: dict | None = None,
-                         chat_history: list | None = None) -> str:
+    def _prepare_turn(self, message: str, chat_id: str, payload: dict | None = None,
+                      chat_history: list | None = None) -> tuple[dict, RunnableConfig]:
+        """Build the initial graph state and run config for one turn (shared by chat and stream_chat)."""
+        history = convert_to_messages(chat_history or [])
+        # Copy so the caller's payload is not mutated; tools can read the history via the payload too
+        payload = {**(payload or {}), "chat_history": history}
+        state = {
+            "messages": history + [HumanMessage(content=message)],
+            "summary": "",
+            "payload": payload,
+            "tool_outputs": [],
+        }
+        config = {
+            "configurable": {"thread_id": chat_id, "payload": payload},
+            "recursion_limit": self.config.get("recursion_limit", 50),
+        }
+        return state, config
+
+    async def chat(self, message: str, chat_id: str, payload: dict | None = None,
+                   chat_history: list | None = None) -> dict:
         """Run one turn of the conversation through the compiled graph.
 
         Args:
@@ -331,26 +367,98 @@ class ChatAgent(Agent):
                 messages or dicts like {"role": "user", "content": "..."}.
 
         Returns:
-            The assistant's final response content.
+            {"text": final reply, "tool_outputs": [{"call_id", "name", "data"}, ...]}, where
+            tool_outputs holds the artifacts of tools declared with
+            response_format="content_and_artifact" and call_id is the LLM tool call id.
         """
-        history = convert_to_messages(chat_history or [])
-        # Copy so the caller's payload is not mutated; tools can read the history via the payload too
-        payload = {**(payload or {}), "chat_history": history}
-        state = {
-            "messages": history + [HumanMessage(content=message)],
-            "summary": "",
-            "payload": payload,
-        }
-        config = {
-            "configurable": {"thread_id": chat_id, "payload": payload},
-            "recursion_limit": self.config.get("recursion_limit", 50),
-        }
+        state, config = self._prepare_turn(message, chat_id, payload, chat_history)
         logger.info("[%s] [chat %s] query received: %s", self.name, chat_id, message)
         start = time.perf_counter()
 
         result = await self.graph.ainvoke(state, config=config)
         logger.info("[%s] [chat %s] query completed in %.2fs", self.name, chat_id, time.perf_counter() - start)
 
-        return result["messages"][-1].content
+        return {"text": result["messages"][-1].text, "tool_outputs": result.get("tool_outputs", [])}
 
+    async def start_chat(self, message: str, chat_id: str, payload: dict | None = None,
+                         chat_history: list | None = None) -> str:
+        """Same as chat(), but returns only the assistant's final response text."""
+        return (await self.chat(message, chat_id, payload, chat_history))["text"]
 
+    async def stream_chat(self, message: str, chat_id: str, payload: dict | None = None,
+                          chat_history: list | None = None):
+        """Run one turn like chat(), yielding events while the graph runs.
+
+        Each event is {"schema_version", "run_id", "thread_id", "seq", "type", "data"}, with type:
+            run.started    {}
+            tool.started   {call_id, name, arguments}
+            tool.finished  {call_id, name, status, content, data}  (data = tool artifact or None)
+            message.delta  {message_id, text}                      (final reply tokens only)
+            run.finished   {text, tool_outputs}                    (authoritative result)
+            run.error      {code, message}
+        Exactly one of run.finished / run.error ends the stream. Here call_id is the tool
+        invocation run id (the LLM tool call id is not known when a tool starts), so it pairs
+        tool.started with tool.finished but differs from the call_id returned by chat().
+        """
+        state, config = self._prepare_turn(message, chat_id, payload, chat_history)
+        run_id = str(uuid4())
+        message_id = str(uuid4())
+        seq = 0
+        tool_names = {}
+        tool_outputs = {}
+        final_state = None
+
+        def event(kind, data):
+            nonlocal seq
+            seq += 1
+            return {"schema_version": STREAM_SCHEMA_VERSION, "run_id": run_id, "thread_id": chat_id,
+                    "seq": seq, "type": kind, "data": data}
+
+        logger.info("[%s] [chat %s] stream query received: %s", self.name, chat_id, message)
+        start = time.perf_counter()
+        yield event("run.started", {})
+        try:
+            async for item in self.graph.astream_events(state, config=config, version="v2"):
+                kind = item["event"]
+                invocation_id = item["run_id"]
+
+                if kind == "on_tool_start":
+                    tool_names[invocation_id] = item["name"]
+                    yield event("tool.started", {"call_id": invocation_id, "name": item["name"],
+                                                 "arguments": item["data"].get("input")})
+
+                elif kind in ("on_tool_end", "on_tool_error") and invocation_id in tool_names:
+                    output = item["data"].get("output")
+                    if kind == "on_tool_error":
+                        status, content, artifact = "error", "The tool call failed.", None
+                    elif isinstance(output, ToolMessage):
+                        status, content, artifact = output.status, output.content, output.artifact
+                    else:
+                        status, content, artifact = "success", str(output), None
+                    data = {"call_id": invocation_id, "name": tool_names[invocation_id], "status": status,
+                            "content": content, "data": artifact}
+                    if artifact is not None:
+                        tool_outputs[invocation_id] = {"call_id": invocation_id, "name": data["name"], "data": artifact}
+                    yield event("tool.finished", data)
+
+                elif kind == "on_chat_model_stream" and PUBLIC_RESPONSE_TAG in item.get("tags", []):
+                    text = item["data"]["chunk"].text
+                    if text:
+                        yield event("message.delta", {"message_id": message_id, "text": text})
+
+                elif kind == "on_chain_end" and not item.get("parent_ids"):
+                    final_state = item["data"]["output"]
+
+            if final_state is None:
+                raise RuntimeError("No final graph state was received")
+
+            logger.info("[%s] [chat %s] stream query completed in %.2fs", self.name, chat_id, time.perf_counter() - start)
+            # The final text replaces (not extends) the streamed deltas; fixed direct/refuse replies have no deltas
+            yield event("run.finished", {"text": final_state["messages"][-1].text,
+                                         "tool_outputs": list(tool_outputs.values())})
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("[%s] [chat %s] stream failed (run %s)", self.name, chat_id, run_id)
+            yield event("run.error", {"code": "execution_failed",
+                                      "message": "The agent could not complete this request."})
