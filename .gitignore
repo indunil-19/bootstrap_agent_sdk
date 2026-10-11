@@ -8,3 +8,6 @@ __pycache__/
 venv/
 .idea/
 
+
+# Open WebUI test: trip notes saved by the memory MCP server
+openwebui_test/trip_notes.jsonl
