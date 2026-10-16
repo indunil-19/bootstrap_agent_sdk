@@ -12,7 +12,7 @@
 
 Describe an agent in **one JSON file** (model, instructions, REST APIs, MCP servers, intents) and get a production-ready chat agent built on LangChain and LangGraph, with tool use, conversation summarization, streaming events for rich UIs and token usage. No graph code to write.
 
-[Quick start](#-quick-start) · [API](#-api) · [Tools](#-tools) · [Streaming](#-streaming-to-a-ui) · [Configuration](#-configuration) · [Examples](#-examples)
+[Quick start](#-quick-start) · [.env](#-environment-variables-env) · [API](#-api) · [Tools](#-tools) · [Streaming](#-streaming-to-a-ui) · [Configuration](#-configuration) · [Examples](#-examples)
 
 <img src="docs/images/custom-ui.png" alt="FakeStore shopping assistant built with Bootstrap Agent SDK" width="800">
 
@@ -42,8 +42,47 @@ git clone https://github.com/indunil-19/bootstrap_agent_sdk.git && cd bootstrap_
 python -m venv .venv
 .venv\Scripts\activate           # Windows (macOS/Linux: source .venv/bin/activate)
 pip install -e .                 # package name: bootstrap-agent-sdk
-cp .env.example .env             # then add OPENAI_API_KEY (or ANTHROPIC_API_KEY)
+cp .env.example .env             # then add your API key (see below)
 ```
+
+## 🔐 Environment variables (`.env`)
+
+API keys and other secrets live in environment variables, never in the JSON config. Put them in a `.env` file in your project root:
+
+```bash
+# LLM provider: the key for the provider in "llm_model"
+OPENAI_API_KEY=sk-...              # openai:... (also used for OpenAI-compatible endpoints set in llm_base_url)
+# ANTHROPIC_API_KEY=sk-ant-...     # anthropic:...
+# GOOGLE_API_KEY=...               # google_genai:...
+
+# LangSmith tracing (optional)
+# LANGSMITH_TRACING=true
+# LANGSMITH_API_KEY=lsv2_...
+# LANGSMITH_PROJECT=my-agent
+# LANGSMITH_ENDPOINT=https://eu.api.smith.langchain.com   # only for EU accounts
+
+# Your own secrets, used in the config as ${NAME}
+# SHOP_API_KEY=...
+# JIRA_TOKEN=...
+```
+
+| Variable | Needed for |
+|---|---|
+| `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` / `GOOGLE_API_KEY` | The model provider in `llm_model` (only the one you use). |
+| `LANGSMITH_*` | Optional tracing of every run in [LangSmith](https://smith.langchain.com). |
+| Any other name | Referenced as `${NAME}` in `http_tools` or `mcp_servers`, e.g. `"X-Api-Key": "${SHOP_API_KEY}"`. Replaced at startup; an unset variable makes `create()` fail. |
+
+The library reads environment variables but doesn't load `.env` itself. Load it in your application before creating the agent:
+
+```python
+from dotenv import load_dotenv
+load_dotenv()
+```
+
+In production, you can set the variables in your hosting platform instead of using a `.env` file.
+
+> [!CAUTION]
+> Never commit `.env`: keep it in `.gitignore` and commit only `.env.example`, with empty values. Per-user secrets (a user's access token) don't belong in `.env` either; pass them in the [payload](#-payload).
 
 ## 🏁 Quick start
 
@@ -271,7 +310,7 @@ MCP servers declared under `mcp_servers`, using local (`stdio`) or remote (`stre
 
 </details>
 
-MCP tools that return JSON produce UI data automatically. To see which ones do, run `python -m bootstrap_agent.mcp_ui_check agent_config.json`. MCP tools run out of process, so they don't receive the payload. See [docs/MCP.md](docs/MCP.md).
+MCP tools that return JSON produce UI data automatically. To see which ones do, run `python -m bootstrap_agent.mcp_ui_check agent_config.json`. MCP tools run out of process, so they don't receive the payload.
 
 ## ⚙️ How it works
 
@@ -318,7 +357,7 @@ async for event in agent.stream_chat("Compare the two SSDs", chat_id="chat-1",
 | 🏁 `run.finished` | The final `text`, all `tool_outputs` and `usage`. |
 | ❌ `run.error` | The turn failed. |
 
-Send them to the browser as Server-Sent Events, or translate them to a protocol such as AG-UI. See [docs/rich-ui-streaming.md](docs/rich-ui-streaming.md).
+Send them to the browser as Server-Sent Events, or translate them to a protocol such as AG-UI.
 
 ## 🔧 Configuration
 
@@ -353,8 +392,6 @@ Each intent has a `description` and a `route`: `agent` (default; optionally limi
 
 </details>
 
-Full reference: [CLAUDE.md](CLAUDE.md#configuration).
-
 ## 🧩 Examples
 
 | Example | Frontend | Scenario |
@@ -370,12 +407,3 @@ Full reference: [CLAUDE.md](CLAUDE.md#configuration).
   </tr>
 </table>
 
-## 📚 Documentation
-
-- 🎨 [Rich UIs and streaming](docs/rich-ui-streaming.md): tool data, events, SSE, AG-UI and Open WebUI
-- 🔌 [MCP tools](docs/MCP.md): connecting MCP servers and rendering their results
-- 🏗️ [Configuration and architecture](CLAUDE.md)
-
-## 🧪 Development
-
-There is no unit test suite yet; the scripts in `tests/` make real LLM calls and are run directly, for example `python tests/test_stream.py`. LangSmith tracing is enabled with `LANGSMITH_TRACING=true` and `LANGSMITH_API_KEY` in `.env`.
