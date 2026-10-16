@@ -8,15 +8,16 @@
 [![LangGraph](https://img.shields.io/badge/LangGraph-powered-1C3C3C?logo=langchain&logoColor=white)](https://langchain-ai.github.io/langgraph/)
 [![MCP](https://img.shields.io/badge/MCP-supported-6E56CF)](https://modelcontextprotocol.io/)
 [![AG-UI](https://img.shields.io/badge/AG--UI-compatible-4F46E5)](https://docs.ag-ui.com/)
-[![Version](https://img.shields.io/badge/version-0.1.0-blue)](pyproject.toml)
+[![PyPI](https://img.shields.io/pypi/v/bootstrap-agent-sdk?color=blue)](https://pypi.org/project/bootstrap-agent-sdk/)
+[![License](https://img.shields.io/badge/license-Apache--2.0-green)](https://github.com/indunil-19/bootstrap_agent_sdk/blob/master/LICENSE)
 
 Describe an agent in **one JSON file** (model, instructions, REST APIs, MCP servers, intents) and get a production-ready chat agent built on LangChain and LangGraph, with tool use, conversation summarization, streaming events for rich UIs and token usage. No graph code to write.
 
 [Quick start](#-quick-start) · [.env](#-environment-variables-env) · [API](#-api) · [Tools](#-tools) · [Streaming](#-streaming-to-a-ui) · [Configuration](#-configuration) · [Examples](#-examples)
 
-<img src="docs/images/custom-ui.png" alt="FakeStore shopping assistant built with Bootstrap Agent SDK" width="800">
+<img src="https://raw.githubusercontent.com/indunil-19/bootstrap_agent_sdk/master/docs/images/custom-ui.png" alt="FakeStore shopping assistant built with Bootstrap Agent SDK" width="800">
 
-<sub>The <a href="examples/custom_ui/README.md">custom UI example</a>: tool results render as product cards while the reply streams in.</sub>
+<sub>The <a href="https://github.com/indunil-19/bootstrap_agent_sdk/blob/master/examples/custom_ui/README.md">custom UI example</a>: tool results render as product cards while the reply streams in.</sub>
 
 </div>
 
@@ -38,12 +39,23 @@ Describe an agent in **one JSON file** (model, instructions, REST APIs, MCP serv
 Requires Python 3.10+.
 
 ```bash
+pip install bootstrap-agent-sdk
+```
+
+Then add your API key to a `.env` file (see below).
+
+<details>
+<summary><b>From source (to run the examples or contribute)</b></summary>
+
+```bash
 git clone https://github.com/indunil-19/bootstrap_agent_sdk.git && cd bootstrap_agent_sdk
 python -m venv .venv
 .venv\Scripts\activate           # Windows (macOS/Linux: source .venv/bin/activate)
-pip install -e .                 # package name: bootstrap-agent-sdk
-cp .env.example .env             # then add your API key (see below)
+pip install -e .
+cp .env.example .env             # then add your API key
 ```
+
+</details>
 
 ## 🔐 Environment variables (`.env`)
 
@@ -322,8 +334,8 @@ Each turn runs through a LangGraph `StateGraph`:
     <th>With intent classification</th>
   </tr>
   <tr>
-    <td valign="top" align="center"><img src="docs/images/graph.png" alt="Default agent graph"></td>
-    <td valign="top" align="center"><img src="docs/images/graph-intents.png" alt="Agent graph with intent classification"></td>
+    <td valign="top" align="center"><img src="https://raw.githubusercontent.com/indunil-19/bootstrap_agent_sdk/master/docs/images/graph.png" alt="Default agent graph"></td>
+    <td valign="top" align="center"><img src="https://raw.githubusercontent.com/indunil-19/bootstrap_agent_sdk/master/docs/images/graph-intents.png" alt="Agent graph with intent classification"></td>
   </tr>
 </table>
 
@@ -335,8 +347,6 @@ Each turn runs through a LangGraph `StateGraph`:
 | `response_generator` | Rewrites that answer into the final reply, applying `response_instructions`. |
 | `direct_response` | Replies without tools (small talk), or with a fixed message. |
 | `refuse` | Politely declines requests outside the agent's scope. |
-
-Draw the graph of any config with `python draw_graph.py [config]`.
 
 ## ⚡ Streaming to a UI
 
@@ -396,14 +406,18 @@ Each intent has a `description` and a `route`: `agent` (default; optionally limi
 
 | Example | Frontend | Scenario |
 |---|---|---|
-| 🛒 [Custom UI](examples/custom_ui/README.md) | React app reading `stream_chat()` events | FakeStore shopping assistant: search, comparison table, cart |
-| 🔗 [AG-UI](examples/agui/README.md) | React app with `@ag-ui/client` | The same shopping assistant over the AG-UI protocol |
-| 🌴 [Open WebUI](examples/openwebui/README.md) | Open WebUI Pipe with HTML cards | Sri Lanka travel assistant: destinations, live weather, recipes, trip notes (MCP) |
+| 🛒 [Custom UI](https://github.com/indunil-19/bootstrap_agent_sdk/blob/master/examples/custom_ui/README.md) | React app reading `stream_chat()` events | FakeStore shopping assistant: search, comparison table, cart |
+| 🔗 [AG-UI](https://github.com/indunil-19/bootstrap_agent_sdk/blob/master/examples/agui/README.md) | React app with `@ag-ui/client` | The same shopping assistant over the AG-UI protocol |
+| 🌴 [Open WebUI](https://github.com/indunil-19/bootstrap_agent_sdk/blob/master/examples/openwebui/README.md) | Open WebUI Pipe with HTML cards | Sri Lanka travel assistant: destinations, live weather, recipes, trip notes (MCP) |
 
 <table>
   <tr>
-    <td width="50%" align="center"><img src="docs/images/agui.png" alt="AG-UI example"><br><sub>AG-UI: categories, product grid and details</sub></td>
-    <td width="50%" align="center"><img src="docs/images/openwebui.png" alt="Open WebUI example"><br><sub>Open WebUI: recipe and live weather cards</sub></td>
+    <td width="50%" align="center"><img src="https://raw.githubusercontent.com/indunil-19/bootstrap_agent_sdk/master/docs/images/agui.png" alt="AG-UI example"><br><sub>AG-UI: categories, product grid and details</sub></td>
+    <td width="50%" align="center"><img src="https://raw.githubusercontent.com/indunil-19/bootstrap_agent_sdk/master/docs/images/openwebui.png" alt="Open WebUI example"><br><sub>Open WebUI: recipe and live weather cards</sub></td>
   </tr>
 </table>
 
+
+## 📄 License
+
+Released under the [Apache License 2.0](https://github.com/indunil-19/bootstrap_agent_sdk/blob/master/LICENSE).
