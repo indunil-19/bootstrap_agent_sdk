@@ -43,6 +43,7 @@ dependencies = [
 Homepage = "https://github.com/indunil-19/bootstrap_agent_sdk"
 Documentation = "https://github.com/indunil-19/bootstrap_agent_sdk#readme"
 Issues = "https://github.com/indunil-19/bootstrap_agent_sdk/issues"
+Changelog = "https://github.com/indunil-19/bootstrap_agent_sdk/blob/master/CHANGELOG.md"
 
 [tool.setuptools.dynamic]
 version = { attr = "bootstrap_agent.__version__" }
